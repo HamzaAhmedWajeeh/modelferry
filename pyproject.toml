@@ -43,8 +43,19 @@ line-length = 100
 target-version = "py310"
 src = ["src", "tests"]
 
+# offline.py runs on CPython 3.9 (RHEL 9 system Python) and is copied verbatim
+# into every bundle. Pin ruff to 3.9 for that one file so it never suggests a
+# 3.10+ idiom (e.g. PEP 604 `X | None`) that would break at runtime there.
+[tool.ruff.per-file-target-version]
+"src/modelferry/offline.py" = "py39"
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "UP"]
+
+# Belt-and-suspenders alongside per-file-target-version: never let any pyupgrade
+# rewrite touch the runtime-3.9 verifier, regardless of future imports.
+[tool.ruff.lint.per-file-ignores]
+"src/modelferry/offline.py" = ["UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

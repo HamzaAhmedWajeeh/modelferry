@@ -61,12 +61,13 @@ Notes:
     config.json                     small files stored as-is, repo-relative paths preserved
     model-00001-of-00004.safetensors.mfpart0000
     model-00001-of-00004.safetensors.mfpart0001
+    subdir/big.safetensors.mfpart0000   parts sit next to their parent file
     ...
 ```
 
 Bundle name: `<repo name slugified, lowercase>__<7-char commit sha>`.
 
-Files larger than chunk size exist in `payload/` only as `.mfpartNNNN` parts (4-digit, zero-padded, ASCII sort order = join order). Files at or under chunk size are stored whole. The original file tree is reconstructed at unpack.
+Files larger than chunk size exist in `payload/` only as `.mfpartNNNN` parts (4-digit, zero-padded, ASCII sort order = join order). Files at or under chunk size are stored whole. Part files sit next to their parent file, mirroring the repo tree: a chunked file at `subdir/big.safetensors` has its parts at `payload/subdir/big.safetensors.mfpartNNNN`. The original file tree is reconstructed at unpack.
 
 ## 5. manifest.json schema
 
@@ -109,8 +110,8 @@ Serialized with `json.dumps(..., indent=2, sort_keys=True)` and a trailing newli
         "bytes": 4877611040,
         "sha256": "64 hex chars (hash of the ORIGINAL whole file)",
         "parts": [
-          { "name": "model-00001-of-00004.safetensors.mfpart0000", "bytes": 4089446400, "sha256": "..." },
-          { "name": "model-00001-of-00004.safetensors.mfpart0001", "bytes": 788164640, "sha256": "..." }
+          { "name": "model-00001-of-00004.safetensors.mfpart0000", "path": "model-00001-of-00004.safetensors.mfpart0000", "bytes": 4089446400, "sha256": "..." },
+          { "name": "model-00001-of-00004.safetensors.mfpart0001", "path": "model-00001-of-00004.safetensors.mfpart0001", "bytes": 788164640, "sha256": "..." }
         ]
       }
     ]
@@ -125,6 +126,7 @@ Serialized with `json.dumps(..., indent=2, sort_keys=True)` and a trailing newli
 Rules:
 
 - `files[].path` is POSIX-style, relative, normalized. No leading `/`, no `..` segments, no drive letters, no symlinks. Both writer and reader enforce this.
+- `parts[].path` is the payload-relative location of a part. It follows the same path rules as `files[].path`, and must equal `dirname(files[].path)` joined with `parts[].name` (POSIX). The reader enforces this exact layout and rejects any other. `parts[].name` is the part's own filename (`<basename>.mfpartNNNN`).
 - Whole-file `sha256` is always present, including for chunked files, so unpacked output can be re-verified against the manifest forever.
 - `license` comes from repo metadata. If it cannot be determined, the literal string `"UNKNOWN"` (and MANIFEST.md flags it prominently).
 - `manifest_version` is an integer. After Phase 2 the format is frozen: any change to structure or semantics bumps the version, and offline.py must reject versions it does not know with exit code 2 and a clear message.
@@ -159,7 +161,7 @@ Prose style: plain sentences, contractions fine, no marketing language, no em da
 
 Behavior:
 
-- `verify`: check manifest.sha256 matches manifest.json; recompute the sha256 of every on-disk object (each part for chunked files, whole file otherwise) with streamed reads; report per-file status OK / MISMATCH / MISSING; report files present under `payload/` but absent from the manifest as EXTRA. Any MISMATCH, MISSING, or EXTRA means exit 1. `--quiet` prints only the summary line and failures.
+- `verify`: check manifest.sha256 matches manifest.json; recompute the sha256 of every on-disk object (each part for chunked files, whole file otherwise) with streamed reads; report per-file status OK / MISMATCH / MISSING; report files present under `payload/` but absent from the manifest as EXTRA. verify also recomputes the sha256 of the bundled `tools/modelferry_offline.py` and compares it to `verifier.sha256`; a mismatch is exit 1. This self-check catches accidental corruption of the verifier only; tamper resistance stays out-of-band per §9. Any MISMATCH, MISSING, or EXTRA means exit 1. `--quiet` prints only the summary line and failures.
 - `unpack`: run verify first unless `--no-verify`. Refuse a non-empty DEST_DIR unless `--force`. Stream-join parts into the original tree under DEST_DIR (fixed read buffer, §8). After joining a chunked file, recompute its whole-file sha256 and compare to the manifest. Write `UNPACK_RECEIPT.json` into DEST_DIR: bundle name, manifest sha256, timestamp, verified true/false, tool path. Exit 1 on any integrity failure.
 - `inspect`: print the §6 header and totals from the manifest. No hashing.
 - Path safety on unpack (zip-slip): for every manifest path, reject absolute paths, reject any `..` segment, and confirm the resolved destination stays inside DEST_DIR. Never create symlinks. Violation is exit code 1 with an explicit security message.

@@ -1,0 +1,5 @@
+# Normalize line endings to LF in the repo and on checkout. offline.py ships
+# verbatim into every bundle and its sha256 is recorded, so it must not vary by
+# platform. Keep all text files LF for determinism.
+* text=auto eol=lf
+*.py text eol=lf
