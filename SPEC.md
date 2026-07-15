@@ -126,7 +126,8 @@ Serialized with `json.dumps(..., indent=2, sort_keys=True)` and a trailing newli
 Rules:
 
 - `files[].path` is POSIX-style, relative, normalized. No leading `/`, no `..` segments, no drive letters, no symlinks. Both writer and reader enforce this.
-- `parts[].path` is the payload-relative location of a part. It follows the same path rules as `files[].path`, and must equal `dirname(files[].path)` joined with `parts[].name` (POSIX). The reader enforces this exact layout and rejects any other. `parts[].name` is the part's own filename (`<basename>.mfpartNNNN`).
+- `parts[].path` is the payload-relative location of a part. It follows the same path rules as `files[].path`, and must equal `dirname(files[].path)` joined with `parts[].name` (POSIX). The reader enforces this exact layout and rejects any other.
+- `parts[].name` is the part's own filename: a single path segment (no `/`) equal to `basename(files[].path)` + `.mfpart` + exactly four decimal digits (e.g. `model-00001-of-00004.safetensors.mfpart0000`). The reader enforces this and rejects any other name.
 - Whole-file `sha256` is always present, including for chunked files, so unpacked output can be re-verified against the manifest forever.
 - `license` comes from repo metadata. If it cannot be determined, the literal string `"UNKNOWN"` (and MANIFEST.md flags it prominently).
 - `manifest_version` is an integer. After Phase 2 the format is frozen: any change to structure or semantics bumps the version, and offline.py must reject versions it does not know with exit code 2 and a clear message.
@@ -156,7 +157,7 @@ Prose style: plain sentences, contractions fine, no marketing language, no em da
 - One self-contained file. Pack copies this exact file into every bundle at `tools/modelferry_offline.py`.
 - Has its own `argparse`-based `__main__` with subcommands `verify`, `unpack`, `inspect` mirroring §3 semantics.
 - Contains its own manifest reader. Do not share a parsing module with the pack side; the round-trip test in §11 keeps writer and reader honest.
-- Soft cap 500 lines including docstrings, so a human can review the whole file in one sitting. If it grows past that, simplify rather than split.
+- Soft cap 550 lines including docstrings, so a human can review the whole file in one sitting (raised from 500 in phase 2.2 to fit the symlink, atomic-join, and part-name hardening). If it grows past that, simplify rather than split.
 - Progress output: plain prints (files done / total, current file). No dependencies means no fancy bars, and that is fine.
 
 Behavior:

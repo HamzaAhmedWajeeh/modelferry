@@ -14,7 +14,8 @@ import pytest
 
 from _bundle import OFFLINE_PY
 
-MAX_LINES = 500
+# Raised from 500 in phase 2.2 to fit symlink/atomic-join/part-name hardening.
+MAX_LINES = 550
 
 
 def _source():

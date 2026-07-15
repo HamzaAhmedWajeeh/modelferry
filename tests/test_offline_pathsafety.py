@@ -136,3 +136,46 @@ def test_symlink_escape_is_contained(tmp_path):
     assert code == 1
     assert "path safety" in err
     assert not (outside / "evil.bin").exists()
+
+
+# parts[].name enforcement: single segment, basename + ".mfpart" + exactly 4 digits.
+BAD_PART_NAMES = [
+    ("a.bin", "sub/a.bin.mfpart0000"),  # slash: not a single segment
+    ("a.bin", "b.bin.mfpart0000"),  # wrong basename
+    ("a.bin", "a.bin.mfpart000"),  # three digits
+    ("a.bin", "a.bin.mfpart00000"),  # five digits
+]
+
+
+@pytest.mark.parametrize("file_path,part_name", BAD_PART_NAMES)
+def test_bad_part_name_rejected(tmp_path, file_path, part_name):
+    payload = b"abcdefgh"
+    entry = {
+        "path": file_path,
+        "bytes": len(payload),
+        "sha256": sha256_bytes(payload),
+        "parts": [
+            {
+                "name": part_name,
+                "path": part_name,
+                "bytes": len(payload),
+                "sha256": sha256_bytes(payload),
+            }
+        ],
+    }
+    manifest = _base_manifest([entry], len(payload), len(payload))
+    bundle = finalize_manifest(tmp_path / "bundle", manifest)
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 1
+    assert "part name" in err
+
+
+def test_duplicate_object_paths_rejected(tmp_path):
+    # Two file entries claim the same payload path -> overwrite/EXTRA hazard.
+    payload = b"abc"
+    entry = {"path": "dup.bin", "bytes": 3, "sha256": sha256_bytes(payload)}
+    manifest = _base_manifest([dict(entry), dict(entry)], 6, 0)
+    bundle = finalize_manifest(tmp_path / "bundle", manifest, payload_files={"dup.bin": payload})
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 1
+    assert "duplicate" in err

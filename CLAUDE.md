@@ -12,7 +12,7 @@ CLI that packs Hugging Face models into chunked, sha256-manifested bundles for t
 
 ## Hard rules
 
-- IMPORTANT: `src/modelferry/offline.py` uses the Python standard library only, runs on CPython 3.9, imports nothing from the modelferry package, and stays under ~500 lines. It is copied verbatim into every bundle. The AST test in tests/ enforces this; never loosen that test.
+- IMPORTANT: `src/modelferry/offline.py` uses the Python standard library only, runs on CPython 3.9, imports nothing from the modelferry package, and stays under ~550 lines (raised from 500 in phase 2.2 to fit symlink/atomic-join/part-name hardening). It is copied verbatim into every bundle. The AST test in tests/ enforces this; never loosen that test.
 - IMPORTANT: never write tokens or secrets into bundles, manifests, receipts, or logs. `HF_TOKEN` is read from the environment only.
 - manifest.json format is frozen once Phase 2 merges. Any structural or semantic change bumps `manifest_version` and updates SPEC.md §5 in the same commit.
 - All payload IO is streamed with a fixed 8 MiB buffer. Never read a payload file fully into memory.

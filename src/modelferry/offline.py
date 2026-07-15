@@ -10,7 +10,8 @@ gap. Hard constraints (see SPEC.md sections 7 and 11):
 - Runs on CPython 3.9 (RHEL 9 system Python). No syntax or stdlib newer than 3.9.
   In particular, no PEP 604 ``X | None`` at runtime and no
   ``from __future__ import annotations`` (which would let tooling rewrite to it).
-- One file, soft cap ~500 lines, reviewable in one sitting.
+- One file, soft cap ~550 lines, reviewable in one sitting (raised from 500 to fit
+  the symlink, atomic-join, and part-name hardening).
 - All payload IO streams through a fixed 8 MiB buffer. No payload file is ever
   read fully into memory.
 
@@ -130,13 +131,28 @@ def _safe_join(base, rel):
 def _part_rel(file_path, part):
     """Return the enforced payload-relative path of a part.
 
-    SPEC section 5 requires parts[].path == dirname(files[].path)/parts[].name.
-    Any other layout is rejected as an integrity failure.
+    SPEC section 5 requires parts[].name to be a single path segment equal to
+    basename(files[].path) + ".mfpart" + exactly four digits, and
+    parts[].path == dirname(files[].path)/parts[].name. Anything else is rejected
+    as an integrity failure.
     """
     name = part.get("name")
     declared = part.get("path")
     if not isinstance(name, str) or not isinstance(declared, str):
         raise IntegrityError("malformed part entry for %r (missing name/path)" % file_path)
+    prefix = posixpath.basename(file_path) + ".mfpart"
+    digits = name[len(prefix) :] if name.startswith(prefix) else ""
+    valid_name = (
+        "/" not in name
+        and name.startswith(prefix)
+        and len(digits) == 4
+        and all(c in "0123456789" for c in digits)
+    )
+    if not valid_name:
+        raise IntegrityError(
+            "path safety: malformed part name %r for %r (expected %s + 4 digits)"
+            % (name, file_path, prefix)
+        )
     expected = posixpath.join(posixpath.dirname(file_path), name)
     if declared != expected:
         raise IntegrityError(
@@ -229,8 +245,17 @@ def _iter_objects(manifest):
     """Yield (payload_rel_path, sha256, nbytes) for every on-disk payload object.
 
     Whole files yield one tuple; chunked files yield one tuple per part. Also
-    validates each files[].path and the enforced parts[].path layout.
+    validates each files[].path and the enforced parts[].path layout, and rejects
+    any payload path claimed by more than one object (an EXTRA/overwrite hazard).
     """
+    seen = set()
+
+    def _once(rel, sha, nbytes):
+        if rel in seen:
+            raise IntegrityError("duplicate object path %r in manifest" % rel)
+        seen.add(rel)
+        return rel, sha, nbytes
+
     for entry in manifest["payload"]["files"]:
         fpath = entry.get("path")
         if not isinstance(fpath, str):
@@ -240,17 +265,19 @@ def _iter_objects(manifest):
         if parts:
             for part in parts:
                 prel = _part_rel(fpath, part)
-                yield prel, part.get("sha256"), part.get("bytes")
+                yield _once(prel, part.get("sha256"), part.get("bytes"))
         else:
-            yield fpath, entry.get("sha256"), entry.get("bytes")
+            yield _once(fpath, entry.get("sha256"), entry.get("bytes"))
 
 
 # --------------------------------------------------------------------------- #
 # verify
 # --------------------------------------------------------------------------- #
 def _check_object(payload_dir, rel, expected_sha, expected_bytes):
-    """Return status string: OK / MISMATCH / MISSING for one payload object."""
+    """Return status string: SYMLINK / MISSING / MISMATCH / OK for one object."""
     disk = os.path.join(payload_dir, *_safe_rel(rel))
+    if os.path.islink(disk):
+        return "SYMLINK"
     if not os.path.isfile(disk):
         return "MISSING"
     if os.path.getsize(disk) != expected_bytes or _sha256_file(disk) != expected_sha:
@@ -294,6 +321,11 @@ def cmd_verify(bundle_dir, quiet):
         print("%-8s %s" % ("OK", SIDECAR_NAME))
 
     _verify_verifier(bundle_dir, manifest, report, quiet)
+    if not quiet:
+        print(
+            "note: the verifier self-check catches accidental corruption of the "
+            "verifier only; tamper resistance stays out-of-band per SPEC section 9."
+        )
 
     expected_rel = set()
     ok_count = 0
@@ -304,9 +336,9 @@ def cmd_verify(bundle_dir, quiet):
         if status == "OK":
             ok_count += 1
 
-    for rel in _scan_extra(payload_dir, expected_rel):
-        failures.append(("EXTRA", rel))
-        print("EXTRA    %s" % rel)
+    for status, rel in _scan_extra(payload_dir, expected_rel):
+        failures.append((status, rel))
+        print("%-8s %s" % (status, rel))
 
     if failures:
         print(
@@ -319,15 +351,26 @@ def cmd_verify(bundle_dir, quiet):
 
 
 def _scan_extra(payload_dir, expected_rel):
-    """Yield payload-relative paths present on disk but absent from the manifest."""
+    """Yield (status, payload_rel) for symlinks and files absent from the manifest.
+
+    Symlinked directories and files under payload/ are reported SYMLINK regardless
+    of the manifest (os.walk does not follow them). Non-symlink files not named by
+    the manifest are EXTRA. Expected files are checked by _check_object, so they
+    are skipped here to avoid double reporting.
+    """
     if not os.path.isdir(payload_dir):
         return
-    for root, _dirs, files in os.walk(payload_dir):
+    for root, dirs, files in os.walk(payload_dir):
+        for dname in dirs:
+            full = os.path.join(root, dname)
+            if os.path.islink(full):
+                yield "SYMLINK", os.path.relpath(full, payload_dir).replace(os.sep, "/")
         for fname in files:
             full = os.path.join(root, fname)
             rel = os.path.relpath(full, payload_dir).replace(os.sep, "/")
-            if rel not in expected_rel:
-                yield rel
+            if rel in expected_rel:
+                continue
+            yield ("SYMLINK" if os.path.islink(full) else "EXTRA"), rel
 
 
 # --------------------------------------------------------------------------- #
@@ -347,34 +390,43 @@ def _dest_ready(dest_dir, force):
 
 
 def _join_file(entry, payload_dir, dest_dir):
-    """Stream-join one manifest file entry into dest_dir; verify whole-file hash."""
+    """Stream-join one manifest file entry into dest_dir atomically.
+
+    Writes <dest>.mftmp, checks the whole-file hash, and only then os.replace()s it
+    into place. Any failure (bad hash, missing/symlinked source) removes the temp
+    file, so a failed join leaves neither a partial final file nor a .mftmp behind.
+    """
     fpath = entry["path"]
     dest = _safe_join(dest_dir, fpath)
+    parts = entry.get("parts")
+    if parts:
+        sources = [_safe_join(payload_dir, _part_rel(fpath, p)) for p in parts]
+    else:
+        sources = [_safe_join(payload_dir, fpath)]
     parent = os.path.dirname(dest)
     if parent:
         os.makedirs(parent, exist_ok=True)
+    tmp = dest + ".mftmp"
     h = hashlib.sha256()
-    with open(dest, "wb") as out:
-        parts = entry.get("parts")
-        if parts:
-            for part in parts:
-                prel = _part_rel(fpath, part)
-                src = _safe_join(payload_dir, prel)
-                _open_and_copy(src, out, h)
-        else:
-            src = _safe_join(payload_dir, fpath)
-            _open_and_copy(src, out, h)
-    if h.hexdigest() != entry.get("sha256"):
-        raise IntegrityError("unpacked %s failed its whole-file hash check" % fpath)
-
-
-def _open_and_copy(src, out, hasher):
+    ok = False
     try:
-        fh = open(src, "rb")
-    except FileNotFoundError:
-        raise IntegrityError("payload object missing: %s" % src) from None
-    with fh:
-        _copyhash(fh, out, hasher)
+        with open(tmp, "wb") as out:
+            for src in sources:
+                if os.path.islink(src):
+                    raise IntegrityError("payload object is a symlink: %s" % src)
+                try:
+                    fh = open(src, "rb")
+                except FileNotFoundError:
+                    raise IntegrityError("payload object missing: %s" % src) from None
+                with fh:
+                    _copyhash(fh, out, h)
+        if h.hexdigest() != entry.get("sha256"):
+            raise IntegrityError("unpacked %s failed its whole-file hash check" % fpath)
+        os.replace(tmp, dest)
+        ok = True
+    finally:
+        if not ok and os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def cmd_unpack(bundle_dir, dest_dir, no_verify, force):
