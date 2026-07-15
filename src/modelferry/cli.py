@@ -1,9 +1,8 @@
-"""Typer command-line surface for modelferry.
+"""Typer command-line surface for modelferry (SPEC.md section 3).
 
-Phase 1 scaffold: the four subcommands from SPEC.md section 3 are wired up with
-their argument surface but carry no implementation yet. Each raises
-NotImplementedError until its phase lands (offline commands in Phase 2, pack in
-Phase 3).
+`pack` runs the connected-side pack orchestration. `verify`, `unpack`, and
+`inspect` are thin wrappers over offline.main, the exact code that ships inside
+every bundle, so the installed CLI and the bundled tool behave identically.
 """
 
 from __future__ import annotations
@@ -12,7 +11,9 @@ from typing import Annotated
 
 import typer
 
-from . import __version__
+from . import __version__, offline
+from . import pack as pack_mod
+from .errors import PackError
 
 app = typer.Typer(
     add_completion=False,
@@ -45,7 +46,20 @@ def pack(
     ] = None,
 ) -> None:
     """Pack a Hugging Face model repo into a bundle (connected side)."""
-    raise NotImplementedError("pack lands in Phase 3")
+    try:
+        bundle_dir = pack_mod.pack(
+            repo_id,
+            dest,
+            revision=revision,
+            chunk_size=chunk_size,
+            include=include,
+            exclude=exclude,
+            staging=staging,
+        )
+    except PackError as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(e.exit_code) from None
+    typer.echo(f"wrote bundle: {bundle_dir}")
 
 
 @app.command()
@@ -56,7 +70,8 @@ def verify(
     ] = False,
 ) -> None:
     """Verify a bundle offline against its manifest."""
-    raise NotImplementedError("verify lands in Phase 2")
+    argv = ["verify", bundle_dir] + (["--quiet"] if quiet else [])
+    raise typer.Exit(offline.main(argv))
 
 
 @app.command()
@@ -73,7 +88,12 @@ def unpack(
     ] = False,
 ) -> None:
     """Verify and unpack a bundle offline into a loadable model tree."""
-    raise NotImplementedError("unpack lands in Phase 2")
+    argv = ["unpack", bundle_dir, dest_dir]
+    if no_verify:
+        argv.append("--no-verify")
+    if force:
+        argv.append("--force")
+    raise typer.Exit(offline.main(argv))
 
 
 @app.command()
@@ -81,7 +101,7 @@ def inspect(
     bundle_dir: Annotated[str, typer.Argument(help="Bundle directory to inspect.")],
 ) -> None:
     """Print a bundle summary offline. No hashing."""
-    raise NotImplementedError("inspect lands in Phase 2")
+    raise typer.Exit(offline.main(["inspect", bundle_dir]))
 
 
 def version_callback(value: bool) -> None:

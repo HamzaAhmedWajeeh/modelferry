@@ -1,4 +1,4 @@
-"""Phase 1 smoke tests: the CLI skeleton is wired and its commands are stubs."""
+"""CLI wiring: version, help, and that the offline wrappers reach offline.main."""
 
 import pytest
 from typer.testing import CliRunner
@@ -22,16 +22,16 @@ def test_help_lists_all_four_subcommands():
         assert command in result.stdout
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["pack", "some/repo", "--dest", "out"],
-        ["verify", "bundle"],
-        ["unpack", "bundle", "dest"],
-        ["inspect", "bundle"],
-    ],
-)
-def test_subcommands_are_stubs(argv):
-    result = runner.invoke(app, argv)
-    assert result.exit_code != 0
-    assert isinstance(result.exception, NotImplementedError)
+def test_pack_bad_chunk_size_is_usage_error(tmp_path):
+    # parse_chunk_size runs before any hub access, so this needs no network.
+    result = runner.invoke(
+        app, ["pack", "acme/demo", "--dest", str(tmp_path), "--chunk-size", "bogus"]
+    )
+    assert result.exit_code == 2
+
+
+@pytest.mark.parametrize("command", ["verify", "inspect"])
+def test_offline_wrapper_reports_missing_bundle(tmp_path, command):
+    # The wrapper delegates to offline.main, which exits 2 on a non-bundle dir.
+    result = runner.invoke(app, [command, str(tmp_path / "nope")])
+    assert result.exit_code == 2
