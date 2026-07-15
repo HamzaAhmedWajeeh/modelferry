@@ -68,6 +68,7 @@ def render_manifest_md(manifest, manifest_sha256):
     src = manifest["source"]
     payload = manifest["payload"]
     tool = manifest["tool"]
+    verifier = manifest.get("verifier") or {}
     chunk_bytes = payload.get("chunk_size_bytes") or 0
     chunk_display = "none" if chunk_bytes == 0 else human_bytes(chunk_bytes)
 
@@ -84,9 +85,10 @@ def render_manifest_md(manifest, manifest_sha256):
             "",
         ]
     lines += [
-        "This is the approval document for the bundle. Compare the manifest.json",
-        "checksum below to the value you approved, then verify the bundle offline",
-        "with the command in the Verify section.",
+        "This document is the bundle's approval record, and it names two moments.",
+        "Before transfer, approve and retain a copy of this file. On arrival, compare",
+        "the manifest.json checksum below to the copy you retained, then run the verify",
+        "command to check every file.",
         "",
         "## Source",
         "",
@@ -112,6 +114,17 @@ def render_manifest_md(manifest, manifest_sha256):
         f"    {manifest_sha256}",
         "",
         "Compare this to the value approved in review, and to manifest.sha256.",
+        "",
+        "## Verifier",
+        "",
+        f"The bundled verifier is {verifier.get('path')}. Its sha256 is:",
+        "",
+        f"    {verifier.get('sha256')}",
+        "",
+        'This hash is also recorded in manifest.json under "verifier". Compare it to the',
+        "canonical hash published with the modelferry release, or bring your own copy of",
+        "the verifier, to check the verifier out-of-band (see the trust model in the",
+        "README).",
         "",
         "## Verify",
         "",

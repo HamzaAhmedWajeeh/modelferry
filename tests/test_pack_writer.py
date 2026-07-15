@@ -120,6 +120,23 @@ def test_bundled_verifier_is_byte_identical(tmp_path):
     assert manifest["verifier"]["sha256"] == hashlib.sha256(bundled).hexdigest()
 
 
+def test_manifest_md_has_verifier_section_and_two_moments(tmp_path):
+    snap = _make_snapshot(tmp_path, {"a.bin": deterministic_bytes(10)})
+    dest = tmp_path / "out"
+    dest.mkdir()
+    bundle = pack.write_bundle(str(snap), ["a.bin"], str(dest), CHUNK, _source())
+
+    md = (Path(bundle) / "MANIFEST.md").read_text()
+    manifest = json.loads((Path(bundle) / "manifest.json").read_text())
+    # Item 7: intro names both moments.
+    assert "approve and retain" in md
+    assert "On arrival" in md
+    # Item 6: Verifier section anchors the bundled verifier hash out-of-band.
+    assert "## Verifier" in md
+    assert manifest["verifier"]["sha256"] in md
+    assert "tools/modelferry_offline.py" in md
+
+
 def test_preflight_rejects_payload_collision():
     # A literal repo file collides with a generated part name of a chunked file.
     with pytest.raises(UsageError) as excinfo:

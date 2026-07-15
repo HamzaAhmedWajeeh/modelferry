@@ -42,7 +42,9 @@ def pack(
     ] = None,
     staging: Annotated[
         str | None,
-        typer.Option("--staging", help="Download cache dir. Defaults to ~/.cache/modelferry/."),
+        typer.Option(
+            "--staging", help="Local download directory. Defaults to ~/.cache/modelferry/."
+        ),
     ] = None,
 ) -> None:
     """Pack a Hugging Face model repo into a bundle (connected side)."""
@@ -59,6 +61,13 @@ def pack(
     except PackError as e:
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(e.exit_code) from None
+    except OSError as e:
+        typer.echo(
+            f"error: local filesystem error while packing: {e}. "
+            "Check permissions and free disk space, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(4) from None
     typer.echo(f"wrote bundle: {bundle_dir}")
 
 

@@ -218,10 +218,13 @@ def write_bundle(
     ]
     preflight(sized, chunk_size)
 
-    bundle_name = "{}__{}".format(slugify(source["repo_id"]), source["commit_sha"][:7])
+    bundle_name = f"{slugify(source['repo_id'])}__{source['commit_sha'][:7]}"
     bundle_dir = os.path.join(dest_root, bundle_name)
     if os.path.isdir(bundle_dir) and os.listdir(bundle_dir):
-        raise LocalFsError(f"bundle directory already exists and is not empty: {bundle_dir}")
+        raise LocalFsError(
+            f"bundle directory already exists and is not empty: {bundle_dir}. "
+            "Remove it or choose a different --dest, then re-run."
+        )
     payload_dir = os.path.join(bundle_dir, "payload")
     os.makedirs(payload_dir, exist_ok=True)
 

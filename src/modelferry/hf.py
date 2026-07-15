@@ -39,61 +39,80 @@ def _extract_license(info):
     return "UNKNOWN"
 
 
+def _staging_dir_for(staging, repo_id):
+    root = staging or os.path.join(os.path.expanduser("~"), ".cache", "modelferry")
+    return os.path.join(root, repo_id.replace("/", "__"))
+
+
 def resolve_and_download(repo_id, revision, staging, include, exclude):
-    """Return (snapshot_dir, source_metadata, rel_files). Raises SourceError."""
+    """Return (snapshot_dir, source_metadata, rel_files). Raises SourceError.
+
+    Downloads in local_dir mode (§3): real files under --staging, no symlinks,
+    resumable. snapshot_dir also holds a .cache/huggingface metadata dir that is
+    never part of the returned rel_files.
+    """
     from huggingface_hub import HfApi, snapshot_download
-    from huggingface_hub.utils import (
-        GatedRepoError,
-        HfHubHTTPError,
-        RepositoryNotFoundError,
-    )
+    from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
     token = os.environ.get("HF_TOKEN")
     endpoint = os.environ.get("HF_ENDPOINT", DEFAULT_ENDPOINT)
-    staging = staging or os.path.join(os.path.expanduser("~"), ".cache", "modelferry")
+    local_dir = _staging_dir_for(staging, repo_id)
     api = HfApi(endpoint=endpoint, token=token)
 
     try:
         info = api.repo_info(repo_id, revision=revision, repo_type="model", files_metadata=True)
     except GatedRepoError as e:
         raise SourceError(
-            f"repo {repo_id!r} is gated; set HF_TOKEN to an account with access ({e})"
+            f"repo {repo_id!r} is gated. Request access and set HF_TOKEN to an account "
+            f"that has it, then re-run pack ({e})."
         ) from None
     except RepositoryNotFoundError as e:
         raise SourceError(
-            f"repo {repo_id!r} not found (or private without a valid HF_TOKEN): {e}"
+            f"repo {repo_id!r} not found. Check the repo id, or set HF_TOKEN if it is "
+            f"private ({e})."
         ) from None
-    except (HfHubHTTPError, OSError, ValueError) as e:
-        raise SourceError(f"could not read repo {repo_id!r} from the hub: {e}") from None
+    except Exception as e:
+        raise SourceError(
+            f"could not read repo {repo_id!r} from {endpoint}: {e}. Check your network "
+            f"connection and the repo id."
+        ) from None
 
     commit_sha = getattr(info, "sha", None)
     if not commit_sha:
-        raise SourceError(f"hub did not return a commit sha for {repo_id!r} at {revision!r}")
+        raise SourceError(
+            f"the hub returned no commit sha for {repo_id!r} at revision {revision!r}; "
+            f"try a different --revision."
+        )
 
     siblings = [s.rfilename for s in (getattr(info, "siblings", None) or [])]
     wanted = _select(siblings, include, exclude)
     if not wanted:
-        raise SourceError(f"no files matched after --include/--exclude for {repo_id!r}")
+        raise SourceError(
+            f"no files in {repo_id!r} matched the --include/--exclude patterns; widen them."
+        )
 
     try:
         snapshot_dir = snapshot_download(
             repo_id,
             repo_type="model",
             revision=commit_sha,
-            cache_dir=staging,
+            local_dir=local_dir,
             allow_patterns=include or None,
             ignore_patterns=exclude or None,
             token=token,
             endpoint=endpoint,
         )
-    except (HfHubHTTPError, OSError, ValueError) as e:
-        raise SourceError(f"download of {repo_id!r} failed: {e}") from None
+    except Exception as e:
+        raise SourceError(
+            f"download of {repo_id!r} into {local_dir} failed: {e}. Check your network "
+            f"connection and free disk space, then re-run pack to resume."
+        ) from None
 
     rel_files = [
         rel for rel in wanted if os.path.isfile(os.path.join(snapshot_dir, *rel.split("/")))
     ]
     if not rel_files:
-        raise SourceError(f"nothing was downloaded for {repo_id!r}")
+        raise SourceError(f"nothing was downloaded for {repo_id!r} into {local_dir}.")
 
     gated_raw = getattr(info, "gated", False)
     source = {

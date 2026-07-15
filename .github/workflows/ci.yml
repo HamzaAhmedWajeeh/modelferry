@@ -49,3 +49,14 @@ jobs:
         run: uv sync
       - name: Integration tests (network, tiny public repo)
         run: uv run pytest -m network
+
+  airgap-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync dev environment
+        run: uv sync
+      - name: Air-gap end-to-end (docker, --network none)
+        run: bash scripts/e2e_airgap.sh

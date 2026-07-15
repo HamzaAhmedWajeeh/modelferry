@@ -136,15 +136,17 @@ Rules:
 
 Generated at pack time. Contains, in order:
 
-1. Header: repo id, commit SHA, license (UNKNOWN gets a warning box), created-at, tool version, endpoint.
-2. Totals: file count, total bytes (human units and exact), chunk size.
-3. The sha256 of manifest.json (so what was approved can be compared to what arrived).
-4. Verification instructions, exactly:
+1. Header: bundle name and an intro that names both moments. Before transfer, approve and retain a copy of this document. On arrival, compare the manifest.json checksum, then run the verify command.
+2. Source: repo id, commit SHA, revision requested, license (UNKNOWN gets a warning box), gated, endpoint, created-at, tool version.
+3. Totals: file count, total bytes (human units and exact), chunk size.
+4. The sha256 of manifest.json (so what was approved can be compared to what arrived).
+5. Verifier: path and sha256 of the bundled offline.py. The retained approved copy anchors the verifier hash out-of-band per §9, so a receiving site can confirm the bundled verifier or bring its own.
+6. Verification instructions, exactly:
    ```
    python3 tools/modelferry_offline.py verify /path/to/bundle
    ```
    with a note that this requires only Python 3.9+ and no network or packages.
-5. Full file table: path, size, whole-file sha256. Complete hashes, not truncated.
+7. Full file table: path, size, whole-file sha256. Complete hashes, not truncated.
 
 Prose style: plain sentences, contractions fine, no marketing language, no em dashes.
 
