@@ -47,6 +47,36 @@ def test_unpack_rejects_hostile_file_path_and_writes_nothing_outside(tmp_path, b
     assert not (tmp_path / "evil.bin").exists()
 
 
+def test_noncanonical_part_path_rejected(tmp_path):
+    # parts[].path here is perfectly safe on its own (passes _safe_rel: no traversal,
+    # relative, no drive) but is NOT dirname(files[].path)/name -- a nested file's
+    # part dropped at payload root. The canonical-layout rule must still reject it,
+    # so this proves the enforcement is not just _safe_rel in disguise.
+    payload = b"abcdefgh"
+    entry = {
+        "path": "sub/big.bin",
+        "bytes": len(payload),
+        "sha256": sha256_bytes(payload),
+        "parts": [
+            {
+                "name": "big.bin.mfpart0000",
+                "path": "big.bin.mfpart0000",  # canonical would be sub/big.bin.mfpart0000
+                "bytes": len(payload),
+                "sha256": sha256_bytes(payload),
+            }
+        ],
+    }
+    manifest = _base_manifest([entry], len(payload), len(payload))
+    # Write the part at the (wrong) root location so the reject is about layout,
+    # not a missing file.
+    bundle = finalize_manifest(
+        tmp_path / "bundle", manifest, payload_files={"big.bin.mfpart0000": payload}
+    )
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 1
+    assert "required layout" in err
+
+
 def test_hostile_part_path_layout_rejected(tmp_path):
     # Part declares a path that is not dirname(file)/name -> integrity failure.
     entry = {

@@ -1,8 +1,21 @@
 """Manifest and destination errors map to the right exit codes (SPEC section 10)."""
 
-from _bundle import _base_manifest, deterministic_bytes, finalize_manifest, run_offline
+from _bundle import (
+    _base_manifest,
+    deterministic_bytes,
+    finalize_manifest,
+    run_offline,
+    sha256_bytes,
+)
 
 CHUNK = 1024
+
+
+def _assert_one_line_error(err):
+    # Anticipated failures print a single-line message, never a traceback.
+    assert "Traceback" not in err
+    stripped = err.strip()
+    assert stripped and "\n" not in stripped
 
 
 def test_unknown_manifest_version_is_usage_error(tmp_path):
@@ -40,6 +53,41 @@ def test_missing_payload_files_is_usage_error(tmp_path):
     code, out, err = run_offline(["verify", bundle])
     assert code == 2
     assert "payload.files" in err
+
+
+def test_missing_verifier_block_is_usage_error(tmp_path):
+    # Valid JSON, known version, complete payload, but no verifier block.
+    entry = {"path": "a.bin", "bytes": 3, "sha256": sha256_bytes(b"abc")}
+    manifest = _base_manifest([entry], 3, 0)
+    bundle = finalize_manifest(
+        tmp_path / "bundle", manifest, payload_files={"a.bin": b"abc"}, fix_verifier=False
+    )
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 2
+    assert "verifier" in err
+    _assert_one_line_error(err)
+
+
+def test_missing_payload_block_is_usage_error(tmp_path):
+    manifest = _base_manifest([], 0, 0)
+    del manifest["payload"]
+    bundle = finalize_manifest(tmp_path / "bundle", manifest)
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 2
+    assert "payload" in err
+    _assert_one_line_error(err)
+
+
+def test_file_entry_missing_sha256_is_usage_error(tmp_path):
+    # A files[] entry missing a required field must be exit 2, not a MISMATCH or
+    # a KeyError traceback.
+    entry = {"path": "a.bin", "bytes": 3}  # no sha256
+    manifest = _base_manifest([entry], 3, 0)
+    bundle = finalize_manifest(tmp_path / "bundle", manifest, payload_files={"a.bin": b"abc"})
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 2
+    assert "file entry" in err
+    _assert_one_line_error(err)
 
 
 def test_nonempty_dest_without_force_is_fs_error(tmp_path, build_bundle):

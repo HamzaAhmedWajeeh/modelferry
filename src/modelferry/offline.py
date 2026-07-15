@@ -176,7 +176,27 @@ def _load_manifest(bundle_dir):
     payload = manifest.get("payload")
     if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
         raise UsageError("malformed %s: missing payload.files" % MANIFEST_NAME)
+    _validate_shape(manifest)
     return manifest, raw
+
+
+def _validate_shape(manifest):
+    """Reject a well-formed-JSON manifest that is missing required keys (exit 2).
+
+    A missing key must surface as a one-line usage error, not a KeyError
+    traceback later in verify/unpack.
+    """
+    verifier = manifest.get("verifier")
+    if not isinstance(verifier, dict) or "path" not in verifier or "sha256" not in verifier:
+        raise UsageError("malformed manifest: missing or incomplete verifier block")
+    for entry in manifest["payload"]["files"]:
+        if not isinstance(entry, dict) or not all(k in entry for k in ("path", "bytes", "sha256")):
+            raise UsageError("malformed manifest: file entry missing path/bytes/sha256")
+        for part in entry.get("parts") or []:
+            if not isinstance(part, dict) or not all(
+                k in part for k in ("name", "path", "bytes", "sha256")
+            ):
+                raise UsageError("malformed manifest: part entry missing name/path/bytes/sha256")
 
 
 def _check_sidecar(bundle_dir, manifest_bytes):
