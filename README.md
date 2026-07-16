@@ -52,11 +52,12 @@ couple of minutes without downloading real weights.
 
 That repo ships the same weights three ways: `model.safetensors`,
 `pytorch_model.bin`, and `tf_model.h5`. You only want one, so exclude the other
-two. Forcing a small chunk size also lets you watch a file get split into parts:
+two. The safetensors file that remains is only a few hundred KiB, so pass a
+small `--chunk-size` to force it to split into parts and see chunking work:
 
 ```
 modelferry pack hf-internal-testing/tiny-random-gpt2 --dest ./bundles \
-    --chunk-size 1M --exclude "*.bin" --exclude "*.h5"
+    --chunk-size 200K --exclude "*.bin" --exclude "*.h5"
 ```
 
 That writes `./bundles/tiny-random-gpt2__<sha>/`. Look at what a reviewer would

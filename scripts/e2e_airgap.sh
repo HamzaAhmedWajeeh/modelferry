@@ -3,10 +3,11 @@
 # Air-gap end-to-end check (SPEC section 11).
 #
 # Pack the tiny public repo on the host with a small chunk size to force real
-# chunking, then verify and unpack the bundle inside docker with --network none,
-# first on python:3.9-slim and then on rockylinux:9 using the image's own python3
-# (dnf's dependency, no install). The bundled verifier runs with zero network and
-# zero third-party packages. Any network attempt or nonzero exit fails the script.
+# chunking, then run the documented receiving-side sequence (cd into the bundle,
+# inspect . then verify .) and unpack inside docker with --network none, first on
+# python:3.9-slim and then on rockylinux:9 using the image's own python3 (dnf's
+# dependency, no install). The bundled verifier runs with zero network and zero
+# third-party packages. Any network attempt or nonzero exit fails the script.
 #
 # Env overrides: MODELFERRY_PACK (default "uv run --no-sync modelferry").
 set -euo pipefail
@@ -49,12 +50,31 @@ run_in() {
   local image="$1" py="$2"
   log "pull $image (host network)"
   docker pull -q "$image" >/dev/null
-  log "verify inside $image (--network none)"
-  docker run --rm --network none -v "$mount_src":/bundle:ro \
-    "$image" "$py" /bundle/tools/modelferry_offline.py verify /bundle
+
+  # Run the exact sequence MANIFEST.md prints on the receiving side: cd into the
+  # bundle, then inspect . and verify . with relative paths. Capture combined
+  # output (so a failure still shows its diagnostics), then assert both the exit
+  # status and that inspect emitted the recomputed manifest_sha256 line.
+  log "inspect + verify inside $image (--network none), the documented sequence"
+  local out status
+  set +e
+  out="$(docker run --rm --network none -v "$mount_src":/bundle:ro "$image" \
+    sh -c "cd /bundle && $py tools/modelferry_offline.py inspect . && $py tools/modelferry_offline.py verify ." 2>&1)"
+  status=$?
+  set -e
+  printf '%s\n' "$out"
+  if [ "$status" -ne 0 ]; then
+    echo "error: the documented inspect + verify sequence failed inside $image" >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$out" | grep -q '^manifest_sha256: '; then
+    echo "error: inspect did not print a manifest_sha256 line inside $image" >&2
+    exit 1
+  fi
+
   log "unpack inside $image (--network none)"
-  docker run --rm --network none -v "$mount_src":/bundle:ro \
-    "$image" "$py" /bundle/tools/modelferry_offline.py unpack /bundle /tmp/unpacked
+  docker run --rm --network none -v "$mount_src":/bundle:ro "$image" \
+    sh -c "cd /bundle && $py tools/modelferry_offline.py unpack . /tmp/unpacked"
 }
 
 run_in python:3.9-slim python

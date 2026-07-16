@@ -63,6 +63,11 @@ def human_bytes(n):
     return f"{n} B"
 
 
+def _md_cell(text):
+    """Escape a value for a Markdown table cell so a '|' in it can't add columns."""
+    return str(text).replace("\\", "\\\\").replace("|", "\\|")
+
+
 def _object_count(entry):
     """Number of payload objects on media for one file: 1 whole, else one per part.
 
@@ -178,7 +183,8 @@ def render_manifest_md(manifest, manifest_sha256):
     ]
     for entry in files:
         lines.append(
-            f"| {entry['path']} | {entry['bytes']} | {_object_count(entry)} | {entry['sha256']} |"
+            f"| {_md_cell(entry['path'])} | {entry['bytes']} | "
+            f"{_object_count(entry)} | {entry['sha256']} |"
         )
     lines.append("")
     return "\n".join(lines)

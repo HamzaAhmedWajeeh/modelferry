@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from _bundle import deterministic_bytes, run_offline
-from modelferry import pack
+from modelferry import manifest, pack
 from modelferry.errors import UsageError
 
 CHUNK = 1024
@@ -200,6 +200,29 @@ def test_manifest_md_object_counts_agree_with_verify(tmp_path):
     reported = re.search(r"verify OK: (\d+) object\(s\) checked", out)
     assert reported, "verify did not print an object count: " + out
     assert int(reported.group(1)) == declared_objects
+
+
+def test_manifest_md_escapes_pipe_in_path():
+    # A repo file whose name contains '|' must not break the Markdown Files table.
+    # Windows forbids '|' in filenames, so exercise the renderer directly rather
+    # than packing a real file with that name.
+    files = [{"path": "weird|name.txt", "bytes": 3, "sha256": "a" * 64}]
+    man = manifest.build_manifest(
+        bundle_name="x__0000000",
+        created_at="2026-07-16T00:00:00Z",
+        tool=PINNED_TOOL,
+        source=_source(),
+        chunk_size_bytes=0,
+        files=files,
+        verifier={"path": "tools/modelferry_offline.py", "sha256": "b" * 64},
+    )
+    md = manifest.render_manifest_md(man, "d" * 64)
+
+    assert "weird\\|name.txt" in md
+    assert "| weird|name.txt |" not in md  # the raw, column-breaking form
+    row = next(ln for ln in md.splitlines() if ln.startswith("| weird"))
+    # Exactly five unescaped pipes keeps the row at four columns.
+    assert len(re.findall(r"(?<!\\)\|", row)) == 5
 
 
 def test_preflight_rejects_payload_collision():
