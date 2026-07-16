@@ -69,9 +69,57 @@ jobs:
           # the PyPI job, where a duplicate should be a real error.
           skip-existing: true
 
-  # Real release only (tag push). Never runs on a manual dispatch.
-  pypi:
+  # Real release only (tag push). Runs BEFORE the PyPI publish (needs: build) so a
+  # failure here blocks the irreversible publish instead of following it: PyPI is a
+  # write-once index, a GitHub release is editable. Publishes the canonical sha256
+  # of the bundled verifier in the tag's release notes, the out-of-band mitigation
+  # the trust model (README, SPEC section 9) promises: a receiving site can check a
+  # bundle's tools/modelferry_offline.py against this hash before trusting it, or
+  # bring its own known-good copy. Idempotent, so a re-run after a later-step
+  # failure edits the existing release instead of erroring on "already exists".
+  github-release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the GitHub release with the canonical offline.py hash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(sha256sum src/modelferry/offline.py | cut -d' ' -f1)"
+          # Lead with the CHANGELOG 0.1.0 section so the release page says what this
+          # is, then append the verifier block. The awk prints from the 0.1.0 header
+          # up to (not including) the link-reference lines at the end of the file.
+          awk '/^## \[0\.1\.0\]/{f=1} f && /^\[.*\]: /{exit} f{print}' CHANGELOG.md > notes.md
+          cat >> notes.md <<EOF
+
+          ## Verifier
+
+          Canonical sha256 of the offline verifier, copied verbatim into every bundle
+          at \`tools/modelferry_offline.py\` and recorded as \`verifier.sha256\` in each
+          \`manifest.json\`:
+
+          \`\`\`
+          $sha  offline.py
+          \`\`\`
+
+          A receiving site can check a bundle's verifier against this hash out-of-band
+          before trusting it, or ignore the bundled copy and bring its own known-good
+          verifier. See the trust model in the README.
+          EOF
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+          fi
+
+  # Real release only (tag push), gated on github-release so the write-once PyPI
+  # publish happens last, only after the release-notes step has succeeded.
+  pypi:
+    needs: github-release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
@@ -84,36 +132,3 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-
-  # Real release only (tag push), after the package is on PyPI. Publishes the
-  # canonical sha256 of the bundled verifier in the tag's GitHub release notes.
-  # This is the out-of-band mitigation the trust model (README, SPEC section 9)
-  # promises: a receiving site can check a bundle's tools/modelferry_offline.py
-  # against this hash before trusting it, or bring its own known-good copy.
-  github-release:
-    needs: pypi
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create the GitHub release with the canonical offline.py hash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          sha="$(sha256sum src/modelferry/offline.py | cut -d' ' -f1)"
-          cat > notes.md <<EOF
-          Canonical sha256 of the offline verifier ($sha), copied verbatim into
-          every bundle at \`tools/modelferry_offline.py\` and recorded as
-          \`verifier.sha256\` in each \`manifest.json\`:
-
-          \`\`\`
-          $sha  offline.py
-          \`\`\`
-
-          A receiving site can check a bundle's verifier against this hash
-          out-of-band before trusting it, or ignore the bundled copy and bring
-          its own known-good verifier. See the trust model in the README.
-          EOF
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
