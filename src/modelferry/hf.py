@@ -52,20 +52,7 @@ def resolve_and_download(repo_id, revision, staging, include, exclude):
     never part of the returned rel_files.
     """
     from huggingface_hub import HfApi, snapshot_download
-    from huggingface_hub.utils import (
-        GatedRepoError,
-        RepositoryNotFoundError,
-        disable_progress_bars,
-    )
-
-    # hf's downloader and its xet backend render progress through huggingface_hub's
-    # tqdm, which flushes late and can print "downloading bytes"/"reconstructing
-    # file" lines after our own "wrote bundle", so a clean pack looks like it ended
-    # on a bug. Silence them by default so pack output stays plain and ends on
-    # "wrote bundle". A user who wants the bars can set HF_HUB_DISABLE_PROGRESS_BARS
-    # to 0; huggingface_hub gives the env var priority over this call.
-    if "HF_HUB_DISABLE_PROGRESS_BARS" not in os.environ:
-        disable_progress_bars()
+    from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
     token = os.environ.get("HF_TOKEN")
     endpoint = os.environ.get("HF_ENDPOINT", DEFAULT_ENDPOINT)

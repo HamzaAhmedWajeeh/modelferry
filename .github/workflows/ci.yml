@@ -39,9 +39,12 @@ jobs:
       - name: Unit tests (no network)
         run: uv run pytest -m "not network"
 
-  # Resolve every direct dependency to its declared floor and run the offline
-  # suite, so the version lower bounds in pyproject are tested claims instead of
-  # Phase 1 guesses. A floor that does not actually work turns this job red.
+  # Resolve every direct dependency to its declared floor and run the suite, so
+  # the version lower bounds in pyproject are tested claims instead of Phase 1
+  # guesses. A floor that does not actually work turns this job red. The network
+  # integration test is included so the huggingface_hub floor (1.0.0) is exercised
+  # for real: the offline suite never imports huggingface_hub (hf.py's imports are
+  # lazy inside resolve_and_download), so only a real pack reaches it.
   floor-test:
     runs-on: ubuntu-latest
     steps:
@@ -52,6 +55,8 @@ jobs:
         run: uv sync --resolution lowest-direct
       - name: Offline tests at the floors
         run: uv run pytest -m "not network"
+      - name: Integration test at the floors (network, exercises huggingface_hub 1.0.0)
+        run: uv run pytest -m network
 
   integration:
     runs-on: ubuntu-latest

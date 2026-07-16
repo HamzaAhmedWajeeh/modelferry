@@ -26,15 +26,19 @@ classifiers = [
 dependencies = [
     # These floors are tested, not guessed. The floor-test CI job resolves every
     # direct dependency to its declared minimum (uv --resolution lowest-direct) and
-    # runs the offline suite, so a floor that does not work turns the job red. At
-    # the minimums that job resolves and passes on: typer 0.24.0 (older typer caps
-    # click below the 8.4 that floats in as a transitive), rich 13.0.0, and
-    # huggingface_hub 1.0.0 (verified with a real pack too).
+    # runs the suite including the network integration test, so a floor that does
+    # not actually work turns the job red. rich 13.0.0 resolves and passes there.
+    #
+    # typer >=0.24.0 is not a typer API requirement; our code runs on much older
+    # typer. It is the lowest typer lowest-direct can resolve at all here: click is
+    # a transitive that floats to 8.4.x, and only typer >=0.24.0 accepts that click.
+    # Conservative, and fine for a v0.1.0 CLI.
     "typer>=0.24.0",
     "rich>=13",
-    # Bounded above at <2: 1.0 was a real break (requests -> httpx) and this is a
-    # CLI that catches specific hub exception types, so an unbounded >= is exactly
-    # what let the broken 0.24 floor through before.
+    # huggingface_hub 1.0.0 is the lowest that imports the surface hf.py uses and
+    # packs a real repo. Bounded above at <2 because 1.0 was a real break
+    # (requests -> httpx) and this is a CLI that catches specific hub exception
+    # types, so an unbounded >= is exactly what let the broken 0.24 floor through.
     "huggingface_hub>=1.0.0,<2",
 ]
 

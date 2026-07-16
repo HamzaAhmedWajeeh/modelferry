@@ -14,8 +14,10 @@ Set TypingSpeed 45ms
 Set Theme "Catppuccin Mocha"
 
 Hide
-# pack disables hf/xet progress bars itself, so its output stays plain and ends
-# on "wrote bundle" with no extra setup here.
+# For the recording only: silence hf/xet download progress bars so they do not
+# clutter the GIF. In real use these bars are the feedback during a long model
+# download, so pack does not disable them.
+Type "export HF_HUB_DISABLE_PROGRESS_BARS=1" Enter
 Type "rm -rf ./bundles ./model && clear" Enter
 Show
 

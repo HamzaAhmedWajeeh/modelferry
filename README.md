@@ -36,11 +36,22 @@ there.
 
 ## Install
 
-The connected side is a normal Python package:
+The connected side is a command-line tool, so install it in its own isolated
+environment. Nothing imports modelferry, and an isolated install keeps its
+dependency versions from colliding with whatever your projects have pinned.
 
 ```
-pip install modelferry
+uv tool install modelferry
 ```
+
+or
+
+```
+pipx install modelferry
+```
+
+Plain `pip install modelferry` works too if you would rather put it in an
+existing environment.
 
 The disconnected side installs nothing. The verifier travels inside the bundle
 at `tools/modelferry_offline.py` and runs against the system Python.
