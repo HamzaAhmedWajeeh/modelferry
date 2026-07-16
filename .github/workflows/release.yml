@@ -64,6 +64,10 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          # TestPyPI rejects duplicate versions; skip already-present files so a
+          # repeat rehearsal of the same version does not hard-fail. Not set on
+          # the PyPI job, where a duplicate should be a real error.
+          skip-existing: true
 
   # Real release only (tag push). Never runs on a manual dispatch.
   pypi:
