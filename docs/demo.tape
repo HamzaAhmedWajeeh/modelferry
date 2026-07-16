@@ -24,7 +24,7 @@ Show
 Sleep 500ms
 
 Type "# 1. Pack a model into a chunked, hashed bundle." Enter
-Type "#    tiny-random-gpt2 ships the same weights three ways, so drop the duplicates." Enter
+Type "#    tiny-random-gpt2 ships one model in three formats (safetensors/bin/h5); keep one." Enter
 Type "#    200K forces the remaining safetensors file to split into parts." Enter
 Sleep 800ms
 Type `modelferry pack hf-internal-testing/tiny-random-gpt2 --dest ./bundles --chunk-size 200K --exclude "*.bin" --exclude "*.h5"` Enter

@@ -50,10 +50,11 @@ at `tools/modelferry_offline.py` and runs against the system Python.
 This uses a tiny public test repo so you can see the whole round trip in a
 couple of minutes without downloading real weights.
 
-That repo ships the same weights three ways: `model.safetensors`,
-`pytorch_model.bin`, and `tf_model.h5`. You only want one, so exclude the other
-two. The safetensors file that remains is only a few hundred KiB, so pass a
-small `--chunk-size` to force it to split into parts and see chunking work:
+That repo ships one model in three serialization formats: `model.safetensors`,
+`pytorch_model.bin` (PyTorch), and `tf_model.h5` (TensorFlow). You only need one,
+so exclude the other two. The safetensors file that remains is only a few hundred
+KiB, so pass a small `--chunk-size` to force it to split into parts and see
+chunking work:
 
 ```
 modelferry pack hf-internal-testing/tiny-random-gpt2 --dest ./bundles \

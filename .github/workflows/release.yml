@@ -1,17 +1,25 @@
 name: release
 
-# Build the sdist and wheel on every version tag, publish to TestPyPI for a dry
-# run, then publish to PyPI. Both publish steps use trusted publishing (OIDC),
-# so no API tokens are stored in the repo. Configure the publishers first:
+# Two independent triggers, so the TestPyPI rehearsal is a real rehearsal and a
+# re-run of the release tag can never be blocked by TestPyPI rejecting a
+# duplicate version:
+#
+#   workflow_dispatch  -> build and publish to TestPyPI. Run this manually from
+#                         the Actions tab before tagging, to rehearse the upload.
+#   push tag v*        -> build and publish to PyPI. This is the real release.
+#
+# Both publish steps use trusted publishing (OIDC), so no API tokens are stored
+# in the repo. Configure the publishers first:
 #   TestPyPI: https://test.pypi.org/manage/account/publishing/
 #   PyPI:     https://pypi.org/manage/account/publishing/
 # with owner HamzaAhmedWajeeh, repo modelferry, workflow release.yml, and the
-# environment names below.
+# environment names below (testpypi / pypi).
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,6 +32,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg="$(uv run --no-project python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
@@ -38,8 +47,10 @@ jobs:
           name: dist
           path: dist/
 
+  # Manual rehearsal only (workflow_dispatch). Never runs on a tag push.
   testpypi:
     needs: build
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -54,8 +65,10 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
 
+  # Real release only (tag push). Never runs on a manual dispatch.
   pypi:
-    needs: testpypi
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

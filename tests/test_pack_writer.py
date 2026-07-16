@@ -225,6 +225,33 @@ def test_manifest_md_escapes_pipe_in_path():
     assert len(re.findall(r"(?<!\\)\|", row)) == 5
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "sub\\weights.bin",  # backslash
+        "/etc/passwd",  # absolute
+        "C:/weights.bin",  # drive letter
+        "../escape.bin",  # .. segment
+        "dir/../escape.bin",  # .. mid-path
+        "./weights.bin",  # . segment
+        "dir//weights.bin",  # empty segment
+    ],
+)
+def test_preflight_rejects_reader_unsafe_paths(bad):
+    # A path offline.py's _safe_rel would reject must fail preflight (exit 2)
+    # before any download, not at the post-write self-verify.
+    with pytest.raises(UsageError) as excinfo:
+        pack.preflight([(bad, 10)], CHUNK)
+    assert excinfo.value.exit_code == 2
+    # The message names the offending path; it is rendered with !r (repr).
+    assert repr(bad) in str(excinfo.value)
+
+
+def test_preflight_accepts_normal_nested_path():
+    # Sanity: a legitimate nested repo path is not rejected.
+    pack.preflight([("sub/dir/model.safetensors", 10)], CHUNK)
+
+
 def test_preflight_rejects_payload_collision():
     # A literal repo file collides with a generated part name of a chunked file.
     with pytest.raises(UsageError) as excinfo:

@@ -8,6 +8,7 @@ round-trip. hf.py supplies the snapshot directory and source metadata.
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import os
 import platform
 import posixpath
@@ -61,16 +62,41 @@ def _part_paths(rel, count):
         yield posixpath.join(parent, name) if parent else name
 
 
+def _check_repo_path(rel):
+    """Reject a repo path the offline reader's _safe_rel would reject (exit 2).
+
+    Mirrors offline.py _safe_rel: backslash, absolute or drive-lettered paths, and
+    any empty, '.' or '..' segment. offline.py stays the source of truth; this is
+    the pack-side early guard so an unusable path fails before the download instead
+    of at the post-write self-verify, after the whole repo is on disk. Parts are
+    generated from a validated path, so validating the file path covers them.
+    """
+    if not isinstance(rel, str) or not rel:
+        raise UsageError("repo path is empty or not a string")
+    if "\\" in rel:
+        raise UsageError(f"repo path {rel!r} contains a backslash; exclude it and re-pack")
+    if rel.startswith("/") or ntpath.splitdrive(rel)[0] or ":" in rel:
+        raise UsageError(f"repo path {rel!r} is absolute or drive-lettered; exclude it and re-pack")
+    for seg in rel.split("/"):
+        if seg in ("", ".", ".."):
+            raise UsageError(
+                f"repo path {rel!r} has an illegal '.', '..', or empty segment; "
+                "exclude it and re-pack"
+            )
+
+
 def preflight(files, chunk_size):
     """Reject a payload layout before any bytes are written (exit 2).
 
-    files is a list of (repo_rel_path, size_bytes). Refuses if two payload paths
-    collide, if a repo path ends in the reserved .mftmp suffix, or if any file
-    needs more than MAX_PARTS parts; the message names the offending file (and the
-    minimum viable chunk size for the part-count case).
+    files is a list of (repo_rel_path, size_bytes). Refuses a path the offline
+    reader would reject, two colliding payload paths, a repo path ending in the
+    reserved .mftmp suffix, or any file needing more than MAX_PARTS parts; the
+    message names the offending file (and the minimum viable chunk size for the
+    part-count case).
     """
     seen = {}
     for rel, size in files:
+        _check_repo_path(rel)
         if rel.endswith(TMP_SUFFIX):
             raise UsageError(
                 f"repo path {rel!r} ends in the reserved suffix {TMP_SUFFIX}; "
