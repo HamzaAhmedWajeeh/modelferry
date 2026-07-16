@@ -18,9 +18,18 @@ def test_pack_verify_unpack_tiny_repo(tmp_path):
     from modelferry import hf, pack
 
     staging = str(tmp_path / "staging")
-    # Resolve + download once to get the snapshot we will compare against.
-    snapshot_dir, _source, rel_files = hf.resolve_and_download(
-        TINY_REPO, "main", staging, None, None
+    # Production path: resolve then download (exactly what pack() calls), to get
+    # the snapshot we compare the unpacked tree against.
+    resolved = hf.resolve(TINY_REPO, "main", staging, None, None)
+    wanted = [rel for rel, _ in resolved["files"]]
+    snapshot_dir, rel_files = hf.download(
+        TINY_REPO,
+        resolved["commit_sha"],
+        resolved["local_dir"],
+        resolved["endpoint"],
+        None,
+        None,
+        wanted,
     )
     assert rel_files, "expected the tiny repo to contain files"
 

@@ -154,16 +154,3 @@ def download(repo_id, commit_sha, local_dir, endpoint, include, exclude, wanted)
     if not rel_files:
         raise SourceError(f"nothing was downloaded for {repo_id!r} into {local_dir}.")
     return snapshot_dir, rel_files
-
-
-def resolve_and_download(repo_id, revision, staging, include, exclude):
-    """Resolve then download in one call. Returns (snapshot_dir, source, rel_files).
-
-    Kept for callers that do not need the free-space gate between the two steps.
-    """
-    r = resolve(repo_id, revision, staging, include, exclude)
-    wanted = [rel for rel, _ in r["files"]]
-    snapshot_dir, rel_files = download(
-        repo_id, r["commit_sha"], r["local_dir"], r["endpoint"], include, exclude, wanted
-    )
-    return snapshot_dir, r["source"], rel_files

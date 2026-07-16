@@ -160,3 +160,39 @@ def test_pack_checks_space_before_download(tmp_path, monkeypatch):
     with pytest.raises(LocalFsError) as excinfo:
         pack.pack("acme/model", str(dest))
     assert excinfo.value.exit_code == 4
+
+
+def test_pack_checks_bundle_path_before_download(tmp_path, monkeypatch):
+    import modelferry.hf as hf
+
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    # A bundle from a prior run already occupies the target path (slug + sha7).
+    existing = dest / "model__aaaaaaa"
+    existing.mkdir()
+    (existing / "payload").write_text("stale")
+
+    def fake_resolve(*a, **k):
+        return {
+            "commit_sha": "a" * 40,
+            "source": {"repo_id": "acme/model", "commit_sha": "a" * 40},
+            "files": [("model.bin", 100)],
+            "total_bytes": 100,
+            "local_dir": str(stage),
+            "endpoint": "https://huggingface.co",
+        }
+
+    def no_download(*a, **k):
+        raise AssertionError("download must not run when the bundle path is taken")
+
+    monkeypatch.setattr(hf, "resolve", fake_resolve)
+    monkeypatch.setattr(hf, "download", no_download)
+    # Plenty of space, so the free-space gate passes and we reach the bundle check.
+    monkeypatch.setattr(pack, "_same_volume", lambda a, b: True)
+    monkeypatch.setattr(pack.shutil, "disk_usage", lambda p: Usage(10_000, 0, 10_000))
+    with pytest.raises(LocalFsError) as excinfo:
+        pack.pack("acme/model", str(dest))
+    assert excinfo.value.exit_code == 4
+    assert "already exists" in str(excinfo.value)

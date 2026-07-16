@@ -245,13 +245,9 @@ def write_bundle(
     ]
     preflight(sized, chunk_size)
 
-    bundle_name = f"{slugify(source['repo_id'])}__{source['commit_sha'][:7]}"
+    bundle_name = _bundle_name(source["repo_id"], source["commit_sha"])
     bundle_dir = os.path.join(dest_root, bundle_name)
-    if os.path.isdir(bundle_dir) and os.listdir(bundle_dir):
-        raise LocalFsError(
-            f"bundle directory already exists and is not empty: {bundle_dir}. "
-            "Remove it or choose a different --dest, then re-run."
-        )
+    _check_bundle_path(dest_root, source["repo_id"], source["commit_sha"])  # cheap re-check
     payload_dir = os.path.join(bundle_dir, "payload")
     os.makedirs(payload_dir, exist_ok=True)
 
@@ -376,14 +372,36 @@ def _check_free_space(total_bytes, staging_dir, dest_root):
         )
 
 
+def _bundle_name(repo_id, commit_sha):
+    return f"{slugify(repo_id)}__{commit_sha[:7]}"
+
+
+def _check_bundle_path(dest_root, repo_id, commit_sha):
+    """Refuse before downloading if the target bundle directory already has
+    contents (exit 4).
+
+    The bundle name is slug + 7-char sha, both known from the resolved commit, so
+    this is checkable before any bytes move. Same class of failure as an unmounted
+    --dest: fail in a second instead of after the whole download. write_bundle
+    re-checks at write time as a cheap assertion.
+    """
+    bundle_dir = os.path.join(dest_root, _bundle_name(repo_id, commit_sha))
+    if os.path.isdir(bundle_dir) and os.listdir(bundle_dir):
+        raise LocalFsError(
+            f"bundle directory already exists and is not empty: {bundle_dir}. "
+            "Remove it or choose a different --dest, then re-run."
+        )
+
+
 def pack(
     repo_id, dest, revision="main", chunk_size="3900M", include=None, exclude=None, staging=None
 ):
     """Resolve, download, and pack a Hugging Face model repo. Returns the bundle path.
 
-    --dest and free space are validated before the download (§3): dest is the
-    likeliest thing to be wrong (unmounted media, wrong drive letter), so it is
-    checked up front instead of after the whole repo is on disk.
+    --dest, free space, and the target bundle path are all validated before the
+    download (§3). dest is the likeliest thing to be wrong (unmounted media, wrong
+    drive letter), and the bundle name is known from the resolved commit, so each
+    is checked up front instead of after the whole repo is on disk.
     """
     from . import hf  # imported here so offline-only tests never import huggingface_hub
 
@@ -391,6 +409,7 @@ def pack(
     dest_root = _validate_dest(dest)
     resolved = hf.resolve(repo_id, revision, staging, include, exclude)
     _check_free_space(resolved["total_bytes"], resolved["local_dir"], dest_root)
+    _check_bundle_path(dest_root, repo_id, resolved["commit_sha"])
     wanted = [rel for rel, _ in resolved["files"]]
     snapshot_dir, rel_files = hf.download(
         repo_id,
