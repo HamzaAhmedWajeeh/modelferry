@@ -47,6 +47,7 @@ Notes:
 - Hugging Face auth: `HF_TOKEN` environment variable only. Never a flag, never written to any file (§9).
 - Custom hub endpoints: respect the standard `HF_ENDPOINT` env var. Record the endpoint used in the manifest.
 - `--staging` defaults to `~/.cache/modelferry/`. Re-running pack after an interruption resumes the download (huggingface_hub handles resume).
+- `--dest` and free space are validated before the download starts, because `--dest` is usually removable media and an unmounted stick or wrong drive letter is the common failure. Pack first creates `--dest` if absent and confirms it is a writable directory. Then, after resolving the repo (so hub metadata gives the exact total size) but before downloading, it compares that total against free space on the `--staging` and `--dest` volumes, requiring roughly twice the total when they share one volume. Either failure is exit code 4, naming the path, and no bytes are downloaded.
 
 ## 4. Bundle layout
 

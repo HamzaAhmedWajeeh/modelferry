@@ -14,6 +14,7 @@ import platform
 import posixpath
 import re
 import shutil
+import tempfile
 from datetime import datetime, timezone
 
 from . import __version__, manifest, offline
@@ -288,15 +289,116 @@ def write_bundle(
     return bundle_dir
 
 
+def _validate_dest(dest):
+    """Ensure --dest exists as a writable directory before any download (exit 4).
+
+    Creates it if absent, confirms it is a directory, then probes writability by
+    creating and deleting a temp file. --dest is usually removable media, so an
+    unmounted stick or a wrong drive letter is caught here, up front, instead of
+    after a multi-gigabyte download that then fails on the very last step.
+    """
+    if not os.path.isdir(dest):
+        if os.path.exists(dest):
+            raise LocalFsError(
+                f"--dest {dest} exists but is not a directory. Choose a directory, then re-run."
+            )
+        try:
+            os.makedirs(dest, exist_ok=True)
+        except OSError as e:
+            raise LocalFsError(
+                f"cannot create --dest {dest}: {e}. Check the path (is the drive or media "
+                "mounted?) and permissions, then re-run."
+            ) from None
+    try:
+        fd, probe = tempfile.mkstemp(prefix=".mfwrite-", dir=dest)
+        os.close(fd)
+        os.remove(probe)
+    except OSError as e:
+        raise LocalFsError(
+            f"--dest {dest} is not writable: {e}. Check permissions or choose a different "
+            "--dest, then re-run."
+        ) from None
+    return dest
+
+
+def _existing_ancestor(path):
+    """Nearest existing directory at or above path (path itself may not exist yet)."""
+    p = os.path.abspath(path)
+    while not os.path.exists(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    return p
+
+
+def _free_bytes(path):
+    return shutil.disk_usage(_existing_ancestor(path)).free
+
+
+def _same_volume(a, b):
+    return os.stat(_existing_ancestor(a)).st_dev == os.stat(_existing_ancestor(b)).st_dev
+
+
+def _check_free_space(total_bytes, staging_dir, dest_root):
+    """Refuse before downloading if free space is short (exit 4).
+
+    The download lands in staging_dir and the bundle is written under dest_root;
+    each holds roughly total_bytes. When they share a volume both live there at
+    once, so that volume needs about twice total_bytes; check the combined
+    requirement rather than each path in isolation. Sizes come from hub metadata
+    (§3); if the hub reports no sizes total_bytes is 0 and the check is a no-op.
+    """
+    if _same_volume(staging_dir, dest_root):
+        need = 2 * total_bytes
+        free = _free_bytes(dest_root)
+        if free < need:
+            raise LocalFsError(
+                f"not enough free space on the volume holding both --staging and --dest "
+                f"{dest_root}: need about {need} bytes (twice the {total_bytes}-byte "
+                f"download, since they share a volume), {free} available. Free space, or "
+                "put --staging and --dest on different volumes, then re-run."
+            )
+        return
+    staging_free = _free_bytes(staging_dir)
+    if staging_free < total_bytes:
+        raise LocalFsError(
+            f"not enough free space for the download in the staging directory "
+            f"{staging_dir}: need {total_bytes} bytes, {staging_free} available. Free "
+            "space or choose a different --staging, then re-run."
+        )
+    dest_free = _free_bytes(dest_root)
+    if dest_free < total_bytes:
+        raise LocalFsError(
+            f"not enough free space for the bundle at --dest {dest_root}: need about "
+            f"{total_bytes} bytes, {dest_free} available. Free space or choose a "
+            "different --dest, then re-run."
+        )
+
+
 def pack(
     repo_id, dest, revision="main", chunk_size="3900M", include=None, exclude=None, staging=None
 ):
-    """Resolve, download, and pack a Hugging Face model repo. Returns the bundle path."""
+    """Resolve, download, and pack a Hugging Face model repo. Returns the bundle path.
+
+    --dest and free space are validated before the download (§3): dest is the
+    likeliest thing to be wrong (unmounted media, wrong drive letter), so it is
+    checked up front instead of after the whole repo is on disk.
+    """
     from . import hf  # imported here so offline-only tests never import huggingface_hub
 
     chunk_bytes = parse_chunk_size(chunk_size)
-    snapshot_dir, source, rel_files = hf.resolve_and_download(
-        repo_id, revision, staging, include, exclude
+    dest_root = _validate_dest(dest)
+    resolved = hf.resolve(repo_id, revision, staging, include, exclude)
+    _check_free_space(resolved["total_bytes"], resolved["local_dir"], dest_root)
+    wanted = [rel for rel, _ in resolved["files"]]
+    snapshot_dir, rel_files = hf.download(
+        repo_id,
+        resolved["commit_sha"],
+        resolved["local_dir"],
+        resolved["endpoint"],
+        include,
+        exclude,
+        wanted,
     )
-    os.makedirs(dest, exist_ok=True)
-    return write_bundle(snapshot_dir, rel_files, dest, chunk_bytes, source)
+    return write_bundle(snapshot_dir, rel_files, dest_root, chunk_bytes, resolved["source"])

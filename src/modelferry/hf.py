@@ -44,14 +44,16 @@ def _staging_dir_for(staging, repo_id):
     return os.path.join(root, repo_id.replace("/", "__"))
 
 
-def resolve_and_download(repo_id, revision, staging, include, exclude):
-    """Return (snapshot_dir, source_metadata, rel_files). Raises SourceError.
+def resolve(repo_id, revision, staging, include, exclude):
+    """Resolve a repo to a commit and select files, without downloading anything.
 
-    Downloads in local_dir mode (§3): real files under --staging, no symlinks,
-    resumable. snapshot_dir also holds a .cache/huggingface metadata dir that is
-    never part of the returned rel_files.
+    Returns a dict: commit_sha, source (the §5 source block), files (list of
+    (repo_rel_path, size_bytes) for the selected files, sizes from hub metadata),
+    total_bytes, local_dir (the staging path the download will land in), endpoint.
+    Raises SourceError (exit 3). Separated from download() so pack can validate
+    --dest and free space against total_bytes before any bytes move.
     """
-    from huggingface_hub import HfApi, snapshot_download
+    from huggingface_hub import HfApi
     from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 
     token = os.environ.get("HF_TOKEN")
@@ -84,13 +86,50 @@ def resolve_and_download(repo_id, revision, staging, include, exclude):
             f"try a different --revision."
         )
 
-    siblings = [s.rfilename for s in (getattr(info, "siblings", None) or [])]
-    wanted = _select(siblings, include, exclude)
+    size_by_path = {}
+    for s in getattr(info, "siblings", None) or []:
+        name = getattr(s, "rfilename", None)
+        if name is not None:
+            size_by_path[name] = getattr(s, "size", None) or 0
+    wanted = _select(list(size_by_path), include, exclude)
     if not wanted:
         raise SourceError(
             f"no files in {repo_id!r} matched the --include/--exclude patterns; widen them."
         )
+    files = [(rel, size_by_path.get(rel, 0)) for rel in wanted]
 
+    gated_raw = getattr(info, "gated", False)
+    source = {
+        "type": "huggingface",
+        "endpoint": endpoint,
+        "repo_id": repo_id,
+        "repo_type": "model",
+        "revision_requested": revision,
+        "commit_sha": commit_sha,
+        "license": _extract_license(info),
+        "gated": bool(gated_raw) and gated_raw is not False,
+    }
+    return {
+        "commit_sha": commit_sha,
+        "source": source,
+        "files": files,
+        "total_bytes": sum(size for _, size in files),
+        "local_dir": local_dir,
+        "endpoint": endpoint,
+    }
+
+
+def download(repo_id, commit_sha, local_dir, endpoint, include, exclude, wanted):
+    """Download the selected files at commit_sha into local_dir.
+
+    Returns (snapshot_dir, rel_files). Downloads in local_dir mode (§3): real
+    files under --staging, no symlinks, resumable. snapshot_dir also holds a
+    .cache/huggingface metadata dir that is never part of rel_files. Raises
+    SourceError (exit 3).
+    """
+    from huggingface_hub import snapshot_download
+
+    token = os.environ.get("HF_TOKEN")
     print(f"downloading {len(wanted)} file(s) from {repo_id} at {commit_sha[:7]} ...")
     try:
         snapshot_dir = snapshot_download(
@@ -114,16 +153,17 @@ def resolve_and_download(repo_id, revision, staging, include, exclude):
     ]
     if not rel_files:
         raise SourceError(f"nothing was downloaded for {repo_id!r} into {local_dir}.")
+    return snapshot_dir, rel_files
 
-    gated_raw = getattr(info, "gated", False)
-    source = {
-        "type": "huggingface",
-        "endpoint": endpoint,
-        "repo_id": repo_id,
-        "repo_type": "model",
-        "revision_requested": revision,
-        "commit_sha": commit_sha,
-        "license": _extract_license(info),
-        "gated": bool(gated_raw) and gated_raw is not False,
-    }
-    return snapshot_dir, source, rel_files
+
+def resolve_and_download(repo_id, revision, staging, include, exclude):
+    """Resolve then download in one call. Returns (snapshot_dir, source, rel_files).
+
+    Kept for callers that do not need the free-space gate between the two steps.
+    """
+    r = resolve(repo_id, revision, staging, include, exclude)
+    wanted = [rel for rel, _ in r["files"]]
+    snapshot_dir, rel_files = download(
+        repo_id, r["commit_sha"], r["local_dir"], r["endpoint"], include, exclude, wanted
+    )
+    return snapshot_dir, r["source"], rel_files
