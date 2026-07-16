@@ -26,7 +26,11 @@ classifiers = [
 dependencies = [
     "typer>=0.12",
     "rich>=13",
-    "huggingface_hub>=0.24",
+    # Floor is the version we actually run and test: uv.lock pins 1.23.0 and every
+    # CI job resolves to it. huggingface_hub 0.24 fails to import on Python 3.12
+    # (its inference types are broken) and 1.0 swapped requests for httpx, so the
+    # old >=0.24 floor was never exercised. See the wheel-install CI job.
+    "huggingface_hub>=1.23.0",
 ]
 
 [project.urls]

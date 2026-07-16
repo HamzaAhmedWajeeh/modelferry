@@ -60,3 +60,38 @@ jobs:
         run: uv sync
       - name: Air-gap end-to-end (docker, --network none)
         run: bash scripts/e2e_airgap.sh
+
+  # Network job, like integration: install modelferry as a built wheel into a
+  # clean venv with the repo not on the path, then run the full pack/verify/unpack
+  # round trip from a temp dir. uv sync installs the project editable, so this is
+  # the only job that exercises the wheel a user actually gets, and it proves
+  # pack.py finds offline.py inside the installed package (not at a repo path).
+  wheel-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Build the wheel
+        run: uv build
+      - name: Install the wheel into a clean venv (repo not on the path)
+        run: |
+          uv venv /tmp/wenv
+          uv pip install --python /tmp/wenv/bin/python dist/*.whl
+      - name: Pack/verify/unpack round trip from a temp dir (network, tiny repo)
+        env:
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+        run: |
+          mf=/tmp/wenv/bin/modelferry
+          # Prove the CLI and its offline.py come from the installed wheel, not the
+          # repo checkout the reviewer worried could mask a __file__ resolution bug.
+          /tmp/wenv/bin/python -c "import modelferry,pathlib; p=pathlib.Path(modelferry.__file__); assert 'site-packages' in str(p), p; print('modelferry from', p)"
+          work="$(mktemp -d)"
+          cd "$work"
+          "$mf" pack hf-internal-testing/tiny-random-gpt2 --dest ./b --chunk-size 200K --exclude "*.bin" --exclude "*.h5"
+          bundle="$(echo ./b/tiny-random-gpt2__*)"
+          echo "bundle: $bundle"
+          "$mf" verify "$bundle"
+          "$mf" unpack "$bundle" ./out
+          test -f ./out/model.safetensors
+          echo "wheel-install round trip OK"
