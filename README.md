@@ -10,12 +10,17 @@ the receiving side runs against on arrival.
 
 ![modelferry packing, inspecting, verifying, and unpacking a model](docs/demo.gif)
 
-<!--
-TODO(hamza): war-story intro goes here. The time you had to move a 30 GB model
-into the isolated environment, the hand-split zip files, the checksum you
-computed on a napkin, the security review that had nothing to review. Two or
-three short paragraphs, first person. Keep it concrete.
--->
+I thought air-gapped just meant no internet. Same stack, cut the outbound
+route. How hard could it be.
+
+Then I had to get a model in. You don't pull 40GB from Hugging Face and go.
+It moves through whatever channel the client approves, checksums get verified
+by hand, and the file usually gets chopped up because the transfer media won't
+take a single object that size. I've watched senior engineers lose an entire
+afternoon to this. At the end of the afternoon, the only thing you can hand
+the security officer is "trust me, it's the same file."
+
+modelferry does that in one command and gives you the paperwork at the end.
 
 ## What it does
 
