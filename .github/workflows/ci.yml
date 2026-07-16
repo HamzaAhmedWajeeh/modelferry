@@ -39,6 +39,20 @@ jobs:
       - name: Unit tests (no network)
         run: uv run pytest -m "not network"
 
+  # Resolve every direct dependency to its declared floor and run the offline
+  # suite, so the version lower bounds in pyproject are tested claims instead of
+  # Phase 1 guesses. A floor that does not actually work turns this job red.
+  floor-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync at dependency floors
+        run: uv sync --resolution lowest-direct
+      - name: Offline tests at the floors
+        run: uv run pytest -m "not network"
+
   integration:
     runs-on: ubuntu-latest
     steps:

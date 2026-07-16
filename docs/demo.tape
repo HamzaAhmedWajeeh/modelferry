@@ -14,10 +14,8 @@ Set TypingSpeed 45ms
 Set Theme "Catppuccin Mocha"
 
 Hide
-# huggingface_hub's xet backend prints progress bars that keep drawing after
-# "wrote bundle", which reads as broken on a recording. Silence them so the pack
-# output ends cleanly.
-Type "export HF_HUB_DISABLE_PROGRESS_BARS=1" Enter
+# pack disables hf/xet progress bars itself, so its output stays plain and ends
+# on "wrote bundle" with no extra setup here.
 Type "rm -rf ./bundles ./model && clear" Enter
 Show
 

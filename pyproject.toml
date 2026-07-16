@@ -24,13 +24,18 @@ classifiers = [
     "Topic :: System :: Archiving :: Packaging",
 ]
 dependencies = [
-    "typer>=0.12",
+    # These floors are tested, not guessed. The floor-test CI job resolves every
+    # direct dependency to its declared minimum (uv --resolution lowest-direct) and
+    # runs the offline suite, so a floor that does not work turns the job red. At
+    # the minimums that job resolves and passes on: typer 0.24.0 (older typer caps
+    # click below the 8.4 that floats in as a transitive), rich 13.0.0, and
+    # huggingface_hub 1.0.0 (verified with a real pack too).
+    "typer>=0.24.0",
     "rich>=13",
-    # Floor is the version we actually run and test: uv.lock pins 1.23.0 and every
-    # CI job resolves to it. huggingface_hub 0.24 fails to import on Python 3.12
-    # (its inference types are broken) and 1.0 swapped requests for httpx, so the
-    # old >=0.24 floor was never exercised. See the wheel-install CI job.
-    "huggingface_hub>=1.23.0",
+    # Bounded above at <2: 1.0 was a real break (requests -> httpx) and this is a
+    # CLI that catches specific hub exception types, so an unbounded >= is exactly
+    # what let the broken 0.24 floor through before.
+    "huggingface_hub>=1.0.0,<2",
 ]
 
 [project.urls]
