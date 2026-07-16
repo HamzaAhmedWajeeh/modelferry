@@ -4,12 +4,6 @@ Pack a Hugging Face model into a chunked, hashed, self-verifying bundle on the
 connected side. Verify and reassemble it on the disconnected side with no network
 and no third-party dependencies.
 
-The manifest is the product. It doubles as the approval document a security
-officer signs off on before the bundle crosses the air gap, and as the checklist
-the receiving side runs against on arrival.
-
-![modelferry packing, inspecting, verifying, and unpacking a model](docs/demo.gif)
-
 I thought air-gapped just meant no internet. Same stack, cut the outbound
 route. How hard could it be.
 
@@ -21,6 +15,12 @@ afternoon to this. At the end of the afternoon, the only thing you can hand
 the security officer is "trust me, it's the same file."
 
 modelferry does that in one command and gives you the paperwork at the end.
+
+The manifest is the product. It doubles as the approval document that gets
+signed off before the bundle crosses the air gap, and as the checklist the
+receiving side runs against on arrival.
+
+![modelferry packing, inspecting, verifying, and unpacking a model](docs/demo.gif)
 
 ## What it does
 
@@ -77,29 +77,34 @@ modelferry pack hf-internal-testing/tiny-random-gpt2 --dest ./bundles \
     --chunk-size 200K --exclude "*.bin" --exclude "*.h5"
 ```
 
-That writes `./bundles/tiny-random-gpt2__<sha>/`. Look at what a reviewer would
-see:
+That writes `./bundles/tiny-random-gpt2__<sha>/`. `pack` prints the exact bundle
+path on its last line, so use whatever it printed in place of `<sha>` below.
+
+Now pretend you have carried the bundle across the air gap. Everything from here
+runs from inside the bundle with the bundled tool, exactly as the receiving side
+would, with no modelferry install. This is the same three-command sequence
+`MANIFEST.md` prints and `scripts/e2e_airgap.sh` proves under `--network none`.
 
 ```
-modelferry inspect ./bundles/tiny-random-gpt2__<sha>
+cd ./bundles/tiny-random-gpt2__<sha>
 ```
 
-Now pretend you have carried the bundle across the air gap. Verify it with the
-bundled tool, exactly as the receiving side would, with no modelferry install:
+Look at what a reviewer would see, then check every hash against the manifest:
 
 ```
-python3 ./bundles/tiny-random-gpt2__<sha>/tools/modelferry_offline.py \
-    verify ./bundles/tiny-random-gpt2__<sha>
+python3 tools/modelferry_offline.py inspect .
+python3 tools/modelferry_offline.py verify .
 ```
 
-Then reassemble the model tree:
+`inspect` prints the recomputed `manifest_sha256` to compare against the copy
+you approved before transfer, and `verify` prints "verify OK" only when every
+object matches. Then reassemble the model tree:
 
 ```
-python3 ./bundles/tiny-random-gpt2__<sha>/tools/modelferry_offline.py \
-    unpack ./bundles/tiny-random-gpt2__<sha> ./model
+python3 tools/modelferry_offline.py unpack . ../model
 ```
 
-`./model` now holds the original repo tree, and `./model/UNPACK_RECEIPT.json`
+`../model` now holds the original repo tree, and `../model/UNPACK_RECEIPT.json`
 records that it was verified on the way in.
 
 ## Packing a real model
@@ -182,6 +187,15 @@ uv run pytest -m "not network"     # default, offline
 uv run pytest                      # includes the network integration test
 uv run ruff check . && uv run ruff format .
 bash scripts/e2e_airgap.sh         # docker, runs verify/unpack with --network none
+
+# Resolve every dependency to its declared floor and run the suite, so the
+# lower bounds in pyproject are tested claims. The network test is included so
+# the huggingface_hub floor is exercised for real.
+uv sync --resolution lowest-direct && uv run pytest -m "not network" && uv run pytest -m network
+
+# Build the wheel and round-trip pack/verify/unpack from a clean venv with the
+# repo off the path, so the installed package (not the checkout) is exercised.
+uv build && uv venv /tmp/wenv && uv pip install --python /tmp/wenv/bin/python dist/*.whl
 ```
 
 `SPEC.md` is the contract. `src/modelferry/offline.py` is the trust surface: it

@@ -84,3 +84,36 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Real release only (tag push), after the package is on PyPI. Publishes the
+  # canonical sha256 of the bundled verifier in the tag's GitHub release notes.
+  # This is the out-of-band mitigation the trust model (README, SPEC section 9)
+  # promises: a receiving site can check a bundle's tools/modelferry_offline.py
+  # against this hash before trusting it, or bring its own known-good copy.
+  github-release:
+    needs: pypi
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the GitHub release with the canonical offline.py hash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(sha256sum src/modelferry/offline.py | cut -d' ' -f1)"
+          cat > notes.md <<EOF
+          Canonical sha256 of the offline verifier ($sha), copied verbatim into
+          every bundle at \`tools/modelferry_offline.py\` and recorded as
+          \`verifier.sha256\` in each \`manifest.json\`:
+
+          \`\`\`
+          $sha  offline.py
+          \`\`\`
+
+          A receiving site can check a bundle's verifier against this hash
+          out-of-band before trusting it, or ignore the bundled copy and bring
+          its own known-good verifier. See the trust model in the README.
+          EOF
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
