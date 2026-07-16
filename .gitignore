@@ -26,3 +26,8 @@ htmlcov/
 
 # Local Claude Code state (personal, not shared)
 .claude/
+
+# Local demo / scratch bundles (e.g. the README quickstart's --dest ./bundles)
+/bundles/
+/tmp_snapshot/
+/make_demo_bundle.py

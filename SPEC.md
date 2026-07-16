@@ -136,17 +136,18 @@ Rules:
 
 Generated at pack time. Contains, in order:
 
-1. Header: bundle name and an intro that names both moments. Before transfer, approve and retain a copy of this document. On arrival, compare the manifest.json checksum, then run the verify command.
+1. Header: bundle name and an intro that frames the document as the approval record used twice. Before transfer, review and approve the details and keep a copy. On arrival, the check routes through `inspect`: the manifest checksum `inspect` recomputes from the bytes on disk is compared to the checksum in the approved copy, and `verify` must report OK. The comparison is retained-copy against recomputed-from-disk, never a claim inside the arrived document against another claim inside it.
 2. Source: repo id, commit SHA, revision requested, license (UNKNOWN gets a warning box), gated, endpoint, created-at, tool version.
-3. Totals: file count, total bytes (human units and exact), chunk size.
-4. The sha256 of manifest.json (so what was approved can be compared to what arrived).
+3. Totals: file count, payload objects on media (whole files plus generated parts, equal to what `verify` reports as objects checked), total bytes (human units and exact), chunk size. When objects exceed files, a sentence explains that chunked files are split into parts and points at the Parts column.
+4. The sha256 of manifest.json, framed as the value the approved copy carries and the value the receiving side checks against via `inspect` (not a comparison to be made against another value printed in the arrived document).
 5. Verifier: path and sha256 of the bundled offline.py. The retained approved copy anchors the verifier hash out-of-band per §9, so a receiving site can confirm the bundled verifier or bring its own.
-6. Verification instructions, exactly:
+6. Verification instructions: the two-command sequence run from the bundle directory,
    ```
-   python3 tools/modelferry_offline.py verify /path/to/bundle
+   python3 tools/modelferry_offline.py inspect .
+   python3 tools/modelferry_offline.py verify .
    ```
-   with a note that this requires only Python 3.9+ and no network or packages.
-7. Full file table: path, size, whole-file sha256. Complete hashes, not truncated.
+   with a note that this requires only Python 3.9+ and no network or packages, that `inspect` prints the recomputed `manifest_sha256` to compare against the approved copy, and that `verify` prints "verify OK" only when every object matches.
+7. Full file table: path, size in bytes, Parts (object count for that file: 1 stored whole, N when chunked, summing to the Totals objects line), whole-file sha256. Complete hashes, not truncated.
 
 Prose style: plain sentences, contractions fine, no marketing language, no em dashes.
 

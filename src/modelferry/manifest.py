@@ -63,6 +63,16 @@ def human_bytes(n):
     return f"{n} B"
 
 
+def _object_count(entry):
+    """Number of payload objects on media for one file: 1 whole, else one per part.
+
+    Matches how offline.py verify counts objects, so the MANIFEST.md Parts column
+    sums to what verify reports.
+    """
+    parts = entry.get("parts")
+    return len(parts) if parts else 1
+
+
 def render_manifest_md(manifest, manifest_sha256):
     """Render the officer-facing MANIFEST.md per §6. Plain prose, no marketing."""
     src = manifest["source"]
@@ -71,6 +81,12 @@ def render_manifest_md(manifest, manifest_sha256):
     verifier = manifest.get("verifier") or {}
     chunk_bytes = payload.get("chunk_size_bytes") or 0
     chunk_display = "none" if chunk_bytes == 0 else human_bytes(chunk_bytes)
+
+    files = payload["files"]
+    file_count = payload.get("file_count")
+    if file_count is None:
+        file_count = len(files)
+    object_count = sum(_object_count(e) for e in files)
 
     gated = "yes" if src.get("gated") else "no"
     lines = [
@@ -85,10 +101,15 @@ def render_manifest_md(manifest, manifest_sha256):
             "",
         ]
     lines += [
-        "This document is the bundle's approval record, and it names two moments.",
-        "Before transfer, approve and retain a copy of this file. On arrival, compare",
-        "the manifest.json checksum below to the copy you retained, then run the verify",
-        "command to check every file.",
+        "This document is the approval record for this bundle. It gets used twice.",
+        "",
+        "Before transfer: review the details below and approve them, then keep a copy of",
+        "this file. The manifest checksum in your copy is what the receiving side checks",
+        "against.",
+        "",
+        "On arrival: run the commands in the Verify section. If the checksum inspect",
+        "prints differs from the one in your approved copy, or if verify reports anything",
+        "other than OK, this is not the bundle that was approved. Do not use it.",
         "",
         "## Source",
         "",
@@ -103,17 +124,27 @@ def render_manifest_md(manifest, manifest_sha256):
         "",
         "## Totals",
         "",
-        f"- Files: {payload.get('file_count')}",
+        f"- Files: {file_count}",
+        f"- Payload objects on media: {object_count}",
         f"- Total size: {human_bytes(payload.get('total_bytes'))}",
         f"- Chunk size: {chunk_display}",
         "",
+    ]
+    if object_count > file_count:
+        lines += [
+            "Files larger than the chunk size are split into parts, so the media holds more",
+            "objects than the model has files. The Parts column below shows the split.",
+            "",
+        ]
+    lines += [
         "## Manifest checksum",
         "",
         "The sha256 of manifest.json is:",
         "",
         f"    {manifest_sha256}",
         "",
-        "Compare this to the value approved in review, and to manifest.sha256.",
+        "This is the checksum your approved copy carries. The Verify section explains how",
+        "the receiving side checks the arrived bundle against it.",
         "",
         "## Verifier",
         "",
@@ -128,17 +159,26 @@ def render_manifest_md(manifest, manifest_sha256):
         "",
         "## Verify",
         "",
-        "Run this on the receiving side. It needs only Python 3.9+ and no network or",
-        "packages.",
+        "Run these on the receiving side. They need Python 3.9 or newer, no network and",
+        "no packages.",
         "",
-        "    python3 tools/modelferry_offline.py verify /path/to/bundle",
+        "    cd <bundle directory>",
+        "    python3 tools/modelferry_offline.py inspect .",
+        "    python3 tools/modelferry_offline.py verify .",
+        "",
+        "inspect recomputes the manifest checksum from the file on disk and prints it as",
+        "manifest_sha256. Compare that to the checksum in the approved copy of this",
+        "document. verify then checks every object on the media against the manifest and",
+        'prints "verify OK" only if all of them match.',
         "",
         "## Files",
         "",
-        "| Path | Size | sha256 |",
-        "| --- | --- | --- |",
+        "| Path | Size (bytes) | Parts | sha256 |",
+        "| --- | --- | --- | --- |",
     ]
-    for entry in payload["files"]:
-        lines.append(f"| {entry['path']} | {entry['bytes']} | {entry['sha256']} |")
+    for entry in files:
+        lines.append(
+            f"| {entry['path']} | {entry['bytes']} | {_object_count(entry)} | {entry['sha256']} |"
+        )
     lines.append("")
     return "\n".join(lines)

@@ -7,6 +7,7 @@ subprocess, exactly as SPEC section 11 requires.
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -128,13 +129,77 @@ def test_manifest_md_has_verifier_section_and_two_moments(tmp_path):
 
     md = (Path(bundle) / "MANIFEST.md").read_text()
     manifest = json.loads((Path(bundle) / "manifest.json").read_text())
-    # Item 7: intro names both moments.
-    assert "approve and retain" in md
+    # §6 item 1: intro frames the two uses of the document.
+    assert "approval record for this bundle" in md
+    assert "Before transfer" in md
     assert "On arrival" in md
-    # Item 6: Verifier section anchors the bundled verifier hash out-of-band.
+    assert "Do not use it." in md
+    # §6 item 6: Verifier section anchors the bundled verifier hash out-of-band.
     assert "## Verifier" in md
     assert manifest["verifier"]["sha256"] in md
     assert "tools/modelferry_offline.py" in md
+
+
+def _md_sections(md):
+    """Split MANIFEST.md into {heading: body_text} by '## ' headings."""
+    sections = {}
+    current = "_intro"
+    buf = []
+    for line in md.splitlines():
+        if line.startswith("## "):
+            sections[current] = "\n".join(buf)
+            current = line[3:].strip()
+            buf = []
+        else:
+            buf.append(line)
+    sections[current] = "\n".join(buf)
+    return sections
+
+
+def _parts_column_sum(md):
+    """Sum the Parts column of the Files table: '| path | bytes | parts | sha |'."""
+    total = 0
+    for line in md.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip() for c in line.split("|")]
+        # cells == ['', path, size, parts, sha, ''] for data rows.
+        if len(cells) >= 5 and cells[3].isdigit():
+            total += int(cells[3])
+    return total
+
+
+def test_manifest_md_object_counts_agree_with_verify(tmp_path):
+    # SAMPLE has both chunked files (model.safetensors, sub/big.safetensors) and
+    # whole files (config.json, empty.bin), so objects > files.
+    snap = _make_snapshot(tmp_path, SAMPLE)
+    dest = tmp_path / "out"
+    dest.mkdir()
+    bundle = pack.write_bundle(str(snap), list(SAMPLE), str(dest), CHUNK, _source())
+
+    md = (Path(bundle) / "MANIFEST.md").read_text()
+    sections = _md_sections(md)
+
+    # The Verify section must route the retained-copy check through inspect.
+    verify_body = sections["Verify"]
+    assert "inspect" in verify_body
+    assert "modelferry_offline.py inspect ." in verify_body
+    assert "recomputes the manifest checksum" in verify_body
+
+    # Totals declares the on-media object count.
+    match = re.search(r"^- Payload objects on media: (\d+)$", md, re.MULTILINE)
+    assert match, "Totals is missing the 'Payload objects on media' line"
+    declared_objects = int(match.group(1))
+
+    # The Parts column sums to that declared object count.
+    assert _parts_column_sum(md) == declared_objects
+
+    # And that count is exactly what offline.py verify reports for this bundle.
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 0, err + out
+    reported = re.search(r"verify OK: (\d+) object\(s\) checked", out)
+    assert reported, "verify did not print an object count: " + out
+    assert int(reported.group(1)) == declared_objects
 
 
 def test_preflight_rejects_payload_collision():
