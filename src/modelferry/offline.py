@@ -493,6 +493,7 @@ def cmd_inspect(bundle_dir):
     print("created_at:  %s" % manifest.get("created_at"))
     print("tool:        %s %s" % (tool.get("name"), tool.get("version")))
     print("files:       %s" % payload.get("file_count"))
+    print("objects on media: %s" % sum(1 for _ in _iter_objects(manifest)))
     print("total_bytes: %s" % _human(payload.get("total_bytes")))
     print("chunk_size:  %s" % _human(payload.get("chunk_size_bytes")))
     print("manifest_sha256: %s" % _sha256_bytes(raw))
