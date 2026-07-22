@@ -16,11 +16,11 @@ the security officer is "trust me, it's the same file."
 
 modelferry does that in one command and gives you the paperwork at the end.
 
-The manifest is the product. It doubles as the approval document that gets
-signed off before the bundle crosses the air gap, and as the checklist the
-receiving side runs against on arrival.
+The manifest is the product. It doubles as the approval document a security
+officer reviews and approves before the bundle crosses the air gap, and as the
+checklist the receiving side runs against on arrival.
 
-![modelferry packing, inspecting, verifying, and unpacking a model](docs/demo.gif)
+![modelferry packing, inspecting, verifying, and unpacking a model](https://raw.githubusercontent.com/HamzaAhmedWajeeh/modelferry/main/docs/demo.gif)
 
 ## What it does
 
@@ -38,6 +38,11 @@ transformers can load it directly. Both run from a single standard-library
 Python file that ships inside every bundle, so the receiving environment needs
 nothing installed and no network. Python 3.9 or newer is the only requirement
 there.
+
+`pack --sign` optionally signs the manifest on the connected side, and
+`verify-signature` checks that signature against a trusted key. That authenticity
+check runs on the connected or approval side where the key lives, not on the bare
+host. Signing is covered below.
 
 ## Install
 
@@ -107,6 +112,52 @@ python3 tools/modelferry_offline.py unpack . ../model
 `../model` now holds the original repo tree, and `../model/UNPACK_RECEIPT.json`
 records that it was verified on the way in.
 
+## Signing a bundle
+
+Signing is optional and additive. It adds an authenticity check on top of the
+integrity check above: a signed bundle proves its manifest was signed by a key you
+trust, so a bundle someone else rebuilt from scratch fails verification even when
+its own hashes are internally consistent. Packing without `--sign` is unchanged.
+
+You need an ed25519 keypair. Generate one outside any repo and keep the secret key
+off version control:
+
+```
+python3 -c "from modelferry.signing import Ed25519Signer; Ed25519Signer.generate_keypair('signing.key', 'signing.pub')"
+```
+
+Point `MODELFERRY_SIGNING_KEY` at the secret key and pack with `--sign`:
+
+```
+export MODELFERRY_SIGNING_KEY="$PWD/signing.key"
+modelferry pack hf-internal-testing/tiny-random-gpt2 --dest ./bundles \
+    --chunk-size 200K --exclude "*.bin" --exclude "*.h5" --sign
+```
+
+The bundle now carries a detached signature at `manifest.json.sig` over the exact
+`manifest.json` bytes, plus a `signing` block in the manifest. Pack self-verifies
+that signature before it finishes, so a bad signature fails the pack rather than
+shipping. Check it yourself against the public key:
+
+```
+modelferry verify-signature ./bundles/tiny-random-gpt2__<sha> --public-key signing.pub
+```
+
+It prints `VALID` when the signature matches the trusted key. Any other result
+exits non-zero: `BAD_SIGNATURE` if the manifest was altered or signed by another
+key, `KEY_MISMATCH` if the signature is valid but for a different key than the one
+given, `MISSING_SIG` if the sidecar is absent, or `UNSIGNED` for a bundle that was
+never signed. None of those should be trusted.
+
+The public key is what a verifier trusts, and it has to reach them out-of-band.
+modelferry has no signing key of its own: you sign your bundles with your key, and
+whoever operates the approval authority for the receiving environment distributes
+the trusted public key, the same people who approve the manifest checksum. The
+`verify-signature` check runs where that key lives, on the connected or approval
+side, not on the bare disconnected host. See the [Trust model](#trust-model) for
+the full picture, including why the bare-host integrity check does not verify the
+signature.
+
 ## Packing a real model
 
 ```
@@ -127,6 +178,11 @@ Useful options:
 - `--staging` is where the download lands before packing. It defaults to
   `~/.cache/modelferry/`. Re-running `pack` after an interruption resumes the
   download.
+- `--sign` signs the manifest so the bundle can be checked for authenticity with
+  `verify-signature`. The signing key path comes from the `MODELFERRY_SIGNING_KEY`
+  environment variable, only that, never a flag and never written into the bundle.
+  `--sign` with no key set is an error, not a silent unsigned pack. Without
+  `--sign` the bundle is unsigned. See [Signing a bundle](#signing-a-bundle).
 
 Hugging Face auth is the `HF_TOKEN` environment variable, and only that. It is
 never a flag and never written into a bundle, manifest, receipt, or log. Custom
@@ -139,7 +195,9 @@ used is recorded in the manifest.
 so it diffs cleanly and can be compared across sites. It records the source repo
 and resolved commit, the license and gated flag, every file with its size and
 whole-file sha256, the parts each chunked file was split into with their own
-hashes, and the sha256 of the bundled verifier.
+hashes, and the sha256 of the bundled verifier. When a bundle is signed it also
+carries an optional `signing` block, and the detached signature sits beside it at
+`manifest.json.sig`.
 
 `MANIFEST.md` is the same information rendered for a human reviewer. It names two
 moments: before transfer, approve and keep a copy of it; on arrival, compare the
