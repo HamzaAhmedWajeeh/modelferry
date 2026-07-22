@@ -79,7 +79,7 @@ Branch: `phase-signing` off `develop`.
 
 - [ ] **0.7** MANIFEST.md and README reflect signing. MANIFEST.md gains a signing section when signed. The README's honest-limit paragraph flips: authenticity is covered when the bundle is signed and the verifier has the trusted key, with the boundary stated precisely (the bare-host integrity check still does not verify the signature; that is done at approval/admission where the key lives).
 
-- [ ] **0.8** Release 0.2.0. Tag, publish to PyPI, GitHub release. The release notes publish the **public key fingerprint** (the counterpart to publishing the verifier hash today), so a receiving site knows which key legitimately signs modelferry bundles.
+- [ ] **0.8** Release 0.2.0. Tag, publish to PyPI, GitHub release. The release notes publish the canonical `offline.py` **verifier hash** (as every release has since 0.1.0). They do NOT publish any signing key fingerprint: modelferry has no signing key of its own. `pack --sign` is a capability for users to sign THEIR bundles with THEIR keys, distributed out-of-band by whoever operates the approval authority for the receiving environment. There is no canonical modelferry signing key, so no release publishes one.
 
 **Acceptance tests (Phase 0):**
 - `test_offline_stdlib_lint` — offline.py imports only stdlib; fails on a real non-stdlib import. *(passing)*
@@ -91,7 +91,7 @@ Branch: `phase-signing` off `develop`.
 - `test_good_signature_verifies` / `test_tampered_manifest_fails_signature` / `test_wrong_key_fails` / `test_missing_signature_fails`.
 - `test_pack_signs_when_key_present` / `test_pack_unsigned_without_key` / `test_packed_signature_self_verifies`.
 
-**Done when:** a real model packs to a signed bundle, the signature verifies where the key lives, integrity still verifies on the bare stdlib host for both schemas, the guard holds, and 0.2.0 is published with the public key fingerprint in the release notes.
+**Done when:** a real model packs to a signed bundle, the signature verifies where the key lives, integrity still verifies on the bare stdlib host for both schemas, the guard holds, and 0.2.0 is published with the canonical offline.py verifier hash in the release notes (no signing key is published; there is no canonical modelferry signing key).
 
 ---
 

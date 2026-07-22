@@ -143,3 +143,29 @@ def test_signed_bundle_still_integrity_verifies(tmp_path, monkeypatch):
     code, out, err = run_offline(["verify", str(bundle)])
     assert code == 0, err + out
     assert "verify OK" in out
+
+
+def test_manifest_md_shows_signing_when_signed(tmp_path, monkeypatch):
+    # A signed bundle's officer-facing MANIFEST.md gains a Signature section naming
+    # the algorithm, the key id, the sidecar, and the verify-signature command.
+    signer, bundle = _pack_signed(tmp_path, monkeypatch)
+    md = (bundle / "MANIFEST.md").read_text()
+    assert "## Signature" in md
+    assert "ed25519" in md
+    assert signer.key_id() in md
+    assert "manifest.json.sig" in md
+    assert "modelferry verify-signature" in md
+    # The existing integrity approval flow is still present, not replaced.
+    assert "## Verify" in md
+    assert "approved copy" in md
+
+
+def test_manifest_md_no_signing_section_when_unsigned(tmp_path):
+    # An unsigned bundle's MANIFEST.md has no Signature section (unchanged).
+    snap = _snapshot(tmp_path, SAMPLE)
+    bundle = Path(
+        pack.write_bundle(str(snap), list(SAMPLE), str(tmp_path / "out"), CHUNK, _source())
+    )
+    md = (bundle / "MANIFEST.md").read_text()
+    assert "## Signature" not in md
+    assert "verify-signature" not in md

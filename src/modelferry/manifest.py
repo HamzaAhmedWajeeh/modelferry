@@ -121,6 +121,7 @@ def render_manifest_md(manifest, manifest_sha256):
     payload = manifest["payload"]
     tool = manifest["tool"]
     verifier = manifest.get("verifier") or {}
+    signing = manifest.get("signing")
     chunk_bytes = payload.get("chunk_size_bytes") or 0
     chunk_display = "none" if chunk_bytes == 0 else human_bytes(chunk_bytes)
 
@@ -213,6 +214,39 @@ def render_manifest_md(manifest, manifest_sha256):
         "document. verify then checks every object on the media against the manifest and",
         'prints "verify OK" only if all of them match.',
         "",
+    ]
+    if signing:
+        lines += [
+            "## Signature",
+            "",
+            "This bundle is signed, so its manifest can be checked for authenticity, not",
+            "just integrity. The detached signature is over the exact bytes of manifest.json.",
+            "",
+            f"- Algorithm: {signing.get('algorithm')}",
+            f"- Signing key id: {signing.get('key_id')}",
+            f"- Signature file: {signing.get('signature_file')}",
+            "",
+            "To check authenticity, run this on the connected or approval side, where the",
+            "trusted public key lives:",
+            "",
+            "    modelferry verify-signature <bundle directory> --public-key <trusted key>",
+            "",
+            "A VALID result means manifest.json was signed by the holder of that key and its",
+            "key id matches. Any other result means the signature does not match the trusted",
+            "key, so do not treat the bundle as authentic.",
+            "",
+            "This is a separate step from the integrity check above, and uses a separate",
+            "tool. The Verify section proves the bytes on the media match the manifest. The",
+            "signature proves the manifest was signed by a trusted key. It is checked where",
+            "the key lives, not by the bare-host verifier in the bundle, which checks",
+            "integrity only.",
+            "",
+            "Signing augments the checksum comparison. It does not replace it. If you cannot",
+            "run verify-signature, the approval flow above still holds: compare the",
+            "manifest.json checksum to the copy you approved before transfer.",
+            "",
+        ]
+    lines += [
         "## Files",
         "",
         "| Path | Size (bytes) | Parts | sha256 |",
