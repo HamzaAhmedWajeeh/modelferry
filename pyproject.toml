@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modelferry"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pack Hugging Face models into chunked, hashed, self-verifying bundles for air-gapped transfer."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,6 +40,10 @@ dependencies = [
     # (requests -> httpx) and this is a CLI that catches specific hub exception
     # types, so an unbounded >= is exactly what let the broken 0.24 floor through.
     "huggingface_hub>=1.0.0,<2",
+    # Connected-side signing only (0.2.0). PyNaCl backs Ed25519Signer in
+    # signing.py; it never enters offline.py, which stays standard-library only.
+    # 1.5.0 is the current stable line and the tested floor.
+    "pynacl>=1.5.0",
 ]
 
 [project.urls]

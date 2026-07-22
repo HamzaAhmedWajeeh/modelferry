@@ -1,5 +1,7 @@
 """Manifest and destination errors map to the right exit codes (SPEC section 10)."""
 
+from pathlib import Path
+
 from _bundle import (
     _base_manifest,
     deterministic_bytes,
@@ -9,6 +11,16 @@ from _bundle import (
 )
 
 CHUNK = 1024
+
+
+def _v2_bundle(bundle_dir, signing=None):
+    """Build a v2 integrity bundle (one small whole file), optional signing block."""
+    entry = {"path": "a.bin", "bytes": 3, "sha256": sha256_bytes(b"abc")}
+    manifest = _base_manifest([entry], 3, 0)
+    manifest["manifest_version"] = 2
+    if signing is not None:
+        manifest["signing"] = signing
+    return finalize_manifest(bundle_dir, manifest, payload_files={"a.bin": b"abc"})
 
 
 def _assert_one_line_error(err):
@@ -26,6 +38,54 @@ def test_unknown_manifest_version_is_usage_error(tmp_path):
     assert code == 2
     assert "manifest_version" in err
     assert "99" in err
+
+
+def test_unrecognized_version_3_is_usage_error(tmp_path):
+    # A version the reader does not know (here 3) still exits 2, and the message
+    # now names both accepted versions (task 0.4).
+    manifest = _base_manifest([], 0, 0)
+    manifest["manifest_version"] = 3
+    bundle = finalize_manifest(tmp_path / "bundle", manifest)
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 2
+    assert "manifest_version" in err
+    assert "3" in err
+    assert "1 and 2" in err
+    _assert_one_line_error(err)
+
+
+def test_v1_bundle_still_verifies(tmp_path, build_bundle):
+    # No regression: a v1 fixture bundle (what the whole test_offline_* suite uses)
+    # still verifies for integrity under the now-{1,2} reader.
+    bundle = build_bundle(tmp_path / "bundle", {"a.bin": deterministic_bytes(50)}, chunk_size=CHUNK)
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 0, err + out
+    assert "verify OK" in out
+
+
+def test_v2_bundle_verifies_integrity(tmp_path):
+    # An unsigned v2 bundle verifies for integrity.
+    bundle = _v2_bundle(tmp_path / "bundle")
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 0, err + out
+    assert "verify OK" in out
+
+
+def test_v2_signing_block_ignored_by_integrity(tmp_path):
+    # A v2 manifest carrying a signing block, with NO signature sidecar present,
+    # still verifies on integrity alone. offline.py never reads or requires the
+    # signature (that is the separate 0.5 tool); the signing block is not in
+    # payload.files, so _iter_objects never touches it.
+    signing = {
+        "algorithm": "ed25519",
+        "key_id": "deadbeefcafe0000",
+        "signature_file": "manifest.json.sig",
+    }
+    bundle = _v2_bundle(tmp_path / "bundle", signing=signing)
+    assert not (Path(bundle) / "manifest.json.sig").exists()
+    code, out, err = run_offline(["verify", bundle])
+    assert code == 0, err + out
+    assert "verify OK" in out
 
 
 def test_malformed_json_is_usage_error(tmp_path):

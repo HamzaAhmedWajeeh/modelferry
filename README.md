@@ -149,23 +149,49 @@ flagged at the top of the document.
 
 ## Trust model
 
-Stated honestly, because this is the part a security review turns on.
+Stated honestly, because this is the part a security review turns on. modelferry
+checks two different things with two different tools.
 
-v1 protects against accidental corruption, incomplete transfers, media errors,
-and casual tampering with payload files. Any of those shows up as a hash
-mismatch, a missing part, or an extra file, and verify exits non-zero and names
-what failed.
+Integrity is whether the bytes that arrived match the manifest. It protects
+against accidental corruption, incomplete transfers, media errors, and casual
+tampering with payload files. Any of those shows up as a hash mismatch, a missing
+part, or an extra file, and verify exits non-zero and names what failed. Integrity
+is checked by the bundled `offline.py`, standard library only, on the bare
+disconnected host with no network and no key.
 
-v1 does not protect against an adversary who can modify the payload, the
-manifest, and the bundled verifier together. Defending against that requires
-signature verification with a key held out-of-band, which is planned for v1.1
-(minisign).
+Authenticity is whether the manifest was signed by a key you trust. When a bundle
+is signed (`pack --sign`) and the verifier has the trusted public key, authenticity
+is checkable: `modelferry verify-signature` checks the detached signature over
+`manifest.json` against that key. A bundle an attacker rebuilt from scratch, with
+its own internally consistent payload, manifest, and hashes, would pass its own
+integrity check but fail signature verification against the real key, because the
+attacker cannot produce that key's signature.
 
-The mitigation available today is out-of-band verification of the verifier.
-`manifest.json` records the sha256 of the bundled `offline.py`, and every
-release publishes the canonical `offline.py` hash in its release notes. A
-receiving site can check the bundled verifier against that published hash before
-trusting it, or ignore the bundled copy and bring its own known-good verifier.
+The boundary, stated precisely so it isn't oversold: the bare-host integrity
+verifier does not check the signature. Signature verification is a separate
+connected-side tool that holds the trusted key, and it is not copied into the
+bundle. So on a truly bare air-gap host with only system Python and no trusted key
+on hand, you get integrity, and authenticity is established upstream, at the
+approval or admission step where the key lives. Signing protects that approval
+chain. The trusted public key has to reach verifiers out-of-band, and it is the
+approval authority for the receiving environment that distributes it, the same
+people who already approve the manifest checksum. modelferry has no signing key of
+its own and does not distribute keys: `pack --sign` signs your bundles with your
+key, for your environment. The `key_id` in the manifest lets a verifier confirm
+which key a bundle claims to be signed by, but trust in that key comes from the
+operator's out-of-band distribution, not from modelferry. This is key-based
+signing verified against a known key, not end-to-end authenticity on a bare host
+that has no key.
+
+Signing is additive. An unsigned bundle still packs and still verifies for
+integrity; it just carries no authenticity claim, which verify-signature reports
+as UNSIGNED rather than as valid.
+
+The verifier itself is also checkable out-of-band. `manifest.json` records the
+sha256 of the bundled `offline.py`, and every release publishes the canonical
+`offline.py` hash in its release notes. A receiving site can check the bundled
+verifier against that published hash before trusting it, or ignore the bundled
+copy and bring its own known-good verifier.
 
 ## Exit codes
 

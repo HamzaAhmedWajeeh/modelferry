@@ -230,14 +230,37 @@ def _tool_block():
     }
 
 
+def _make_signer(sign):
+    """Resolve the signer for a pack; None when unsigned.
+
+    Signing is opt-in (sign=True) and additionally requires MODELFERRY_SIGNING_KEY
+    to be configured. Asking to sign without a key is a usage error (exit 2), never
+    a silent unsigned pack. Building the signer here, before the download in pack(),
+    fails fast on a missing or unreadable key.
+    """
+    if not sign:
+        return None
+    from .signing import Ed25519Signer, SigningError
+
+    try:
+        return Ed25519Signer()
+    except SigningError as e:
+        raise UsageError(f"--sign was requested but signing is not configured: {e}") from None
+
+
 def write_bundle(
-    snapshot_dir, rel_files, dest_root, chunk_size, source, created_at=None, tool=None
+    snapshot_dir, rel_files, dest_root, chunk_size, source, created_at=None, tool=None, signer=None
 ):
     """Write a bundle from a local snapshot directory. Returns the bundle path.
 
     Runs the pre-flight payload check first, streams every file into payload/,
     copies the verifier in, writes manifest.json / manifest.sha256 / MANIFEST.md,
     then runs the offline verifier against the result (read-back self-check, §8).
+
+    signer, when given (see _make_signer), makes this a signed bundle: the manifest
+    is built with a signing block, the exact serialized bytes are signed, and the
+    detached signature is written to manifest.SIGNATURE_FILENAME. Signing is
+    additive; with signer=None the bundle is byte-for-byte what it was before.
     """
     rel_files = sorted(rel_files)
     sized = [
@@ -259,6 +282,9 @@ def write_bundle(
         )
 
     verifier_rel, verifier_sha = _install_verifier(bundle_dir)
+    # The signing block must be present before serialization, because the signature
+    # covers the final manifest bytes including that block (SPEC §5).
+    signing_block = manifest.signing_block(key_id=signer.key_id()) if signer is not None else None
     man = manifest.build_manifest(
         bundle_name=bundle_name,
         created_at=created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -267,6 +293,7 @@ def write_bundle(
         chunk_size_bytes=chunk_size,
         files=entries,
         verifier={"path": verifier_rel, "sha256": verifier_sha},
+        signing=signing_block,
     )
     raw = manifest.serialize(man)
     with open(os.path.join(bundle_dir, "manifest.json"), "wb") as f:
@@ -277,11 +304,28 @@ def write_bundle(
     with open(os.path.join(bundle_dir, "MANIFEST.md"), "w", encoding="utf-8") as f:
         f.write(manifest.render_manifest_md(man, manifest_sha))
 
+    # Sign the exact serialized manifest bytes and write the detached sidecar. The
+    # manifest never contains its own signature; the sidecar does (SPEC §5).
+    if signer is not None:
+        with open(os.path.join(bundle_dir, manifest.SIGNATURE_FILENAME), "wb") as f:
+            f.write(signer.sign(raw))
+
     if offline.cmd_verify(bundle_dir, quiet=True) != 0:
         raise LocalFsError(
             f"post-pack self-verify failed for {bundle_dir}; the bundle may be corrupt (disk "
             "error or full disk). Re-run pack."
         )
+    # Signed bundles also self-check the signature: prove it verifies against our
+    # own public key before shipping, mirroring the integrity self-verify above.
+    if signer is not None:
+        from . import verify_signature
+
+        result = verify_signature.verify_bundle_signature(bundle_dir, signer.public_key_bytes)
+        if result.outcome != verify_signature.VALID:
+            raise LocalFsError(
+                f"post-pack signature self-check failed for {bundle_dir}: {result.message} "
+                "Re-run pack."
+            )
     return bundle_dir
 
 
@@ -394,19 +438,29 @@ def _check_bundle_path(dest_root, repo_id, commit_sha):
 
 
 def pack(
-    repo_id, dest, revision="main", chunk_size="3900M", include=None, exclude=None, staging=None
+    repo_id,
+    dest,
+    revision="main",
+    chunk_size="3900M",
+    include=None,
+    exclude=None,
+    staging=None,
+    sign=False,
 ):
     """Resolve, download, and pack a Hugging Face model repo. Returns the bundle path.
 
     --dest, free space, and the target bundle path are all validated before the
     download (§3). dest is the likeliest thing to be wrong (unmounted media, wrong
     drive letter), and the bundle name is known from the resolved commit, so each
-    is checked up front instead of after the whole repo is on disk.
+    is checked up front instead of after the whole repo is on disk. sign=True builds
+    the signer up front too (exit 2 if no key), so a missing key fails before the
+    download, not after.
     """
     from . import hf  # imported here so offline-only tests never import huggingface_hub
 
     chunk_bytes = parse_chunk_size(chunk_size)
     dest_root = _validate_dest(dest)
+    signer = _make_signer(sign)  # fail fast (exit 2) before any download
     resolved = hf.resolve(repo_id, revision, staging, include, exclude)
     _check_free_space(resolved["total_bytes"], resolved["local_dir"], dest_root)
     _check_bundle_path(dest_root, repo_id, resolved["commit_sha"])
@@ -420,4 +474,6 @@ def pack(
         exclude,
         wanted,
     )
-    return write_bundle(snapshot_dir, rel_files, dest_root, chunk_bytes, resolved["source"])
+    return write_bundle(
+        snapshot_dir, rel_files, dest_root, chunk_bytes, resolved["source"], signer=signer
+    )

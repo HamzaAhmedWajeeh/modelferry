@@ -14,6 +14,7 @@ gap. Hard constraints (see SPEC.md sections 7 and 11):
   the symlink, atomic-join, and part-name hardening).
 - All payload IO streams through a fixed 8 MiB buffer. No payload file is ever
   read fully into memory.
+- Accepts manifest schema 1 and 2 for integrity only; never imports crypto or checks signatures.
 
 Subcommands mirror the installed CLI: verify, unpack, inspect.
 """
@@ -29,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 BUF_SIZE = 8 * 1024 * 1024
-SUPPORTED_MANIFEST_VERSION = 1
+SUPPORTED_MANIFEST_VERSIONS = frozenset({1, 2})
 MANIFEST_NAME = "manifest.json"
 SIDECAR_NAME = "manifest.sha256"
 PAYLOAD_DIR = "payload"
@@ -184,10 +185,10 @@ def _load_manifest(bundle_dir):
     if not isinstance(manifest, dict):
         raise UsageError("malformed %s: top level is not an object" % MANIFEST_NAME)
     version = manifest.get("manifest_version")
-    if version != SUPPORTED_MANIFEST_VERSION:
+    if version not in SUPPORTED_MANIFEST_VERSIONS:
         raise UsageError(
-            "unsupported manifest_version %r; this verifier understands version %d. "
-            "Use a matching modelferry release." % (version, SUPPORTED_MANIFEST_VERSION)
+            "unsupported manifest_version %r; this verifier understands versions 1 and 2. "
+            "Use a matching modelferry release." % (version,)
         )
     payload = manifest.get("payload")
     if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
