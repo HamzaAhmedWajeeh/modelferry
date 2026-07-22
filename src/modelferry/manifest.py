@@ -11,18 +11,52 @@ from __future__ import annotations
 import hashlib
 import json
 
-MANIFEST_VERSION = 1
+# Schema 2 (0.2.0) adds the optional top-level "signing" block. It is a strict
+# superset of schema 1: a v2 manifest with no signing block is a v1 manifest plus
+# the version number. Payload structure is unchanged. See SPEC §5.
+MANIFEST_VERSION = 2
+
+# The detached signature is written to this sidecar next to manifest.json (wired
+# into pack at 0.6). Named ".sig", not ".minisig": modelferry emits a native
+# ed25519 signature, not a minisign-format signature, so ".minisig" would be
+# dishonest (see the 0.2 native-key-format decision in BUILD_PLAN and SPEC §5). A
+# future MinisignSigner that emits real minisign signatures would use its own
+# ".minisig" sidecar and its own algorithm string.
+SIGNATURE_FILENAME = "manifest.json.sig"
+SIGNING_ALGORITHM = "ed25519"
 
 
-def build_manifest(bundle_name, created_at, tool, source, chunk_size_bytes, files, verifier):
+def signing_block(key_id, algorithm=SIGNING_ALGORITHM, signature_file=SIGNATURE_FILENAME):
+    """Return the canonical manifest signing block (§5).
+
+    It carries only the algorithm, the public-key id, and the external signature
+    filename. It never carries the signature itself: the signature is computed
+    over the final serialized manifest bytes and lives in the sidecar, so putting
+    it inside the manifest would be circular.
+    """
+    return {
+        "algorithm": algorithm,
+        "key_id": key_id,
+        "signature_file": signature_file,
+    }
+
+
+def build_manifest(
+    bundle_name, created_at, tool, source, chunk_size_bytes, files, verifier, signing=None
+):
     """Assemble the manifest dict. Pure function of its inputs (see §5).
 
     files is a list of file entries already carrying path/bytes/sha256 (and parts
     for chunked files). total_bytes and file_count are derived here.
+
+    signing, when given, is included verbatim under the top-level "signing" key
+    (build it with signing_block). When None the key is omitted entirely, so an
+    unsigned bundle carries no "signing" key at all (not "signing": null) and
+    "is it signed" is a plain key-presence check.
     """
     ordered = sorted(files, key=lambda f: f["path"])
     total_bytes = sum(f["bytes"] for f in ordered)
-    return {
+    man = {
         "manifest_version": MANIFEST_VERSION,
         "bundle_name": bundle_name,
         "created_at": created_at,
@@ -37,6 +71,9 @@ def build_manifest(bundle_name, created_at, tool, source, chunk_size_bytes, file
         },
         "verifier": verifier,
     }
+    if signing is not None:
+        man["signing"] = signing
+    return man
 
 
 def serialize(manifest):

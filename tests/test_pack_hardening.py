@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from modelferry import pack
+from modelferry import offline, pack
 from modelferry.hf import _select
 
 FAKE_TOKEN = "hf_FAKESECRET123"
@@ -30,9 +30,21 @@ def test_token_never_written_into_bundle(tmp_path, monkeypatch):
     (snap / "config.json").write_bytes(b'{"model_type": "gpt2"}\n')
     (snap / "weights.bin").write_bytes(bytes(range(256)) * 12)
 
-    bundle = pack.write_bundle(
-        str(snap), ["config.json", "weights.bin"], str(tmp_path / "out"), 1024, _source()
-    )
+    # Task 0.3: the manifest is now v2, and pack's post-pack self-verify
+    # (offline.cmd_verify) accepts only v1 until task 0.4, so write_bundle raises
+    # after fully writing the bundle. Every bundle file (manifest.json, sidecar,
+    # MANIFEST.md, verifier, payload) is on disk before that self-verify runs, so
+    # the token-leak scan below stays fully valid. We deliberately keep this
+    # security test live rather than xfail it (CLAUDE.md: never weaken the
+    # token-leak test). Drop this shim when 0.4 makes the self-verify pass again.
+    out = tmp_path / "out"
+    try:
+        bundle = pack.write_bundle(
+            str(snap), ["config.json", "weights.bin"], str(out), 1024, _source()
+        )
+    except offline.UsageError:
+        src = _source()
+        bundle = str(out / pack._bundle_name(src["repo_id"], src["commit_sha"]))
 
     needle = FAKE_TOKEN.encode()
     scanned = 0

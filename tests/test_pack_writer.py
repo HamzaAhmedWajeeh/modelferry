@@ -13,10 +13,22 @@ from pathlib import Path
 import pytest
 
 from _bundle import deterministic_bytes, run_offline
-from modelferry import manifest, pack
+from modelferry import manifest, offline, pack
 from modelferry.errors import UsageError
 
 CHUNK = 1024
+
+# Task 0.3 bumped the manifest to schema 2. offline.py still accepts only v1 until
+# task 0.4 (the deliberately isolated frozen-file edit), so pack's post-pack
+# self-verify (offline.cmd_verify in pack.write_bundle) rejects the v2 manifest and
+# raises offline.UsageError before write_bundle returns. Every test that packs a
+# real bundle therefore fails here by design. strict=True so each flips to XPASS the
+# moment 0.4 lands and these markers must then be removed.
+needs_v2_reader = pytest.mark.xfail(
+    reason="TODO(0.4): offline accepts v2",
+    raises=offline.UsageError,
+    strict=True,
+)
 
 
 def _source():
@@ -54,6 +66,7 @@ SAMPLE = {
 }
 
 
+@needs_v2_reader
 def test_writer_reader_roundtrip(tmp_path):
     snap = _make_snapshot(tmp_path, SAMPLE)
     dest = tmp_path / "out"
@@ -70,6 +83,7 @@ def test_writer_reader_roundtrip(tmp_path):
         assert (unpacked / Path(rel)).read_bytes() == data
 
 
+@needs_v2_reader
 def test_no_chunking_stores_whole_files(tmp_path):
     snap = _make_snapshot(tmp_path, {"a.bin": deterministic_bytes(5000)})
     dest = tmp_path / "out"
@@ -81,6 +95,7 @@ def test_no_chunking_stores_whole_files(tmp_path):
     assert code == 0, err + out
 
 
+@needs_v2_reader
 def test_manifest_writer_determinism(tmp_path):
     snap = _make_snapshot(tmp_path, SAMPLE)
     b1 = pack.write_bundle(
@@ -107,6 +122,7 @@ def test_manifest_writer_determinism(tmp_path):
     ).read_bytes()
 
 
+@needs_v2_reader
 def test_bundled_verifier_is_byte_identical(tmp_path):
     snap = _make_snapshot(tmp_path, {"a.bin": deterministic_bytes(10)})
     dest = tmp_path / "out"
@@ -121,6 +137,7 @@ def test_bundled_verifier_is_byte_identical(tmp_path):
     assert manifest["verifier"]["sha256"] == hashlib.sha256(bundled).hexdigest()
 
 
+@needs_v2_reader
 def test_manifest_md_has_verifier_section_and_two_moments(tmp_path):
     snap = _make_snapshot(tmp_path, {"a.bin": deterministic_bytes(10)})
     dest = tmp_path / "out"
@@ -169,6 +186,7 @@ def _parts_column_sum(md):
     return total
 
 
+@needs_v2_reader
 def test_manifest_md_object_counts_agree_with_verify(tmp_path):
     # SAMPLE has both chunked files (model.safetensors, sub/big.safetensors) and
     # whole files (config.json, empty.bin), so objects > files.

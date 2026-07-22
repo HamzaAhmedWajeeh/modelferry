@@ -74,9 +74,11 @@ Files larger than chunk size exist in `payload/` only as `.mfpartNNNN` parts (4-
 
 Serialized with `json.dumps(..., indent=2, sort_keys=True)` and a trailing newline, so output is deterministic and diffs cleanly.
 
+As of 0.2.0 the schema is version 2. Version 2 is a strict superset of version 1: it adds one optional top-level `signing` block (below) and changes nothing else. A version-2 manifest with no signing block is byte-for-byte what a version-1 manifest was plus the bumped version number. The example below is an unsigned v2 manifest.
+
 ```json
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "bundle_name": "qwen2.5-7b-instruct__1a2b3c4",
   "created_at": "2026-07-15T09:30:00Z",
   "tool": {
@@ -131,7 +133,30 @@ Rules:
 - `parts[].name` is the part's own filename: a single path segment (no `/`) equal to `basename(files[].path)` + `.mfpart` + exactly four decimal digits (e.g. `model-00001-of-00004.safetensors.mfpart0000`). The reader enforces this and rejects any other name.
 - Whole-file `sha256` is always present, including for chunked files, so unpacked output can be re-verified against the manifest forever.
 - `license` comes from repo metadata. If it cannot be determined, the literal string `"UNKNOWN"` (and MANIFEST.md flags it prominently).
-- `manifest_version` is an integer. After Phase 2 the format is frozen: any change to structure or semantics bumps the version, and offline.py must reject versions it does not know with exit code 2 and a clear message.
+- `manifest_version` is an integer, currently `2` (raised from 1 in 0.2.0 to add the optional signing block). The format is frozen per version: any change to structure or semantics bumps the version. offline.py must reject a `manifest_version` it does not recognize with exit code 2 and a clear message. Which versions offline.py accepts for integrity is stated in §7 (it accepts 1 and 2 as of the 0.2.0 signing work; the offline.py edit that adds 2 is a separate, deliberately isolated change from the manifest bump that produces it).
+
+### Signing block (schema 2, optional)
+
+A signed bundle carries one extra top-level key, `signing`:
+
+```json
+{
+  "signing": {
+    "algorithm": "ed25519",
+    "key_id": "5f3c1a9b0d7e2f84",
+    "signature_file": "manifest.json.sig"
+  }
+}
+```
+
+Rules:
+
+- The block is **omitted entirely** when a bundle is unsigned. An unsigned manifest has no `signing` key at all; it is never `"signing": null`. "Is this bundle signed" is therefore a plain key-presence check.
+- `algorithm` names the signature format actually produced. modelferry 0.2.0 produces a native ed25519 signature, so the value is `"ed25519"`. The value `"minisign-ed25519"` is reserved for a future signer that emits real minisign-format signatures (see the native-key-format decision recorded in BUILD_PLAN.md task 0.2); it is not used while the signature is a raw ed25519 signature.
+- `key_id` is a stable fingerprint derived from the public key (the pack-side `Signer.key_id()`), so a receiving site can tell which key signed the bundle and match it against a published fingerprint. It is derived only from the public key, never from the secret key or the signature.
+- `signature_file` is the payload-relative name of the detached signature sidecar, `"manifest.json.sig"`. It is `.sig`, not `.minisig`, because the signature is a native ed25519 signature and not minisign's format; naming it `.minisig` would imply an interop it does not have. A future MinisignSigner would emit its own `.minisig` sidecar and set `algorithm` accordingly.
+- **The manifest never contains its own signature.** The signing block names the algorithm, the key, and the external sidecar filename, and nothing derived from the signature. The signature is computed over the final serialized `manifest.json` bytes and written to the separate sidecar (at pack time, wired in 0.6). Embedding the signature in the manifest would be circular: the bytes being signed would depend on the signature. The sidecar is verified out-of-band by the connected-side signature verifier (§9, and the 0.2.0 `verify_signature` tool), not by offline.py, which stays crypto-free and checks integrity only (§7).
+- Adding the signing block does not change serialization: `sort_keys=True` places `signing` deterministically among the top-level keys, so the same inputs still produce byte-identical `manifest.json`.
 
 ## 6. MANIFEST.md (officer-facing)
 
