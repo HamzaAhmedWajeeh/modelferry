@@ -245,7 +245,7 @@ modelferry/
 
 - Package requires Python >= 3.10. offline.py alone holds the 3.9 floor.
 - uv for dev environment, ruff for lint and format, pytest for tests.
-- Runtime dependencies are exactly three: typer, rich, huggingface_hub. Adding a fourth requires a spec change.
+- Runtime dependencies are typer, rich, huggingface_hub, and (as of 0.2.0 signing) pynacl. pynacl is connected-side only: it backs manifest signing in `signing.py` and must never enter `offline.py`, which stays standard-library only forever (§7). Adding any further dependency requires a spec change.
 
 ## 13. Build phases
 

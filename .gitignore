@@ -24,6 +24,12 @@ htmlcov/
 # OS cruft
 .DS_Store
 
+# Secrets and signing key material (never committed; the repo is public)
+.env
+*.key
+sec.key
+*.pem
+
 # Local Claude Code state (personal, not shared)
 .claude/
 
