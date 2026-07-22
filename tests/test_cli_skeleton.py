@@ -15,10 +15,10 @@ def test_version_flag():
     assert __version__ in result.stdout
 
 
-def test_help_lists_all_four_subcommands():
+def test_help_lists_all_subcommands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("pack", "verify", "unpack", "inspect"):
+    for command in ("pack", "verify", "unpack", "inspect", "verify-signature"):
         assert command in result.stdout
 
 

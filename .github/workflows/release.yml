@@ -90,10 +90,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha="$(sha256sum src/modelferry/offline.py | cut -d' ' -f1)"
-          # Lead with the CHANGELOG 0.1.0 section so the release page says what this
-          # is, then append the verifier block. The awk prints from the 0.1.0 header
-          # up to (not including) the link-reference lines at the end of the file.
-          awk '/^## \[0\.1\.0\]/{f=1} f && /^\[.*\]: /{exit} f{print}' CHANGELOG.md > notes.md
+          # Lead with this tag's CHANGELOG section so the release page says what this
+          # is, then append the verifier block. Extraction is tag-driven: it prints
+          # from the "## [<version>]" header for this exact tag up to (not including)
+          # the next "## [" section header or the link-reference lines at the end.
+          # The second awk trims trailing blank lines from the section, so the
+          # heredoc's one leading blank line is the single separator before Verifier.
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v hdr="## [$ver]" 'index($0, hdr)==1 {f=1; print; next} f && (/^## \[/ || /^\[.*\]: /) {exit} f {print}' CHANGELOG.md \
+            | awk 'NF {last=NR} {line[NR]=$0} END {for (i=1; i<=last; i++) print line[i]}' > notes.md
+          test -s notes.md || { echo "no CHANGELOG section for $ver"; exit 1; }
           cat >> notes.md <<EOF
 
           ## Verifier

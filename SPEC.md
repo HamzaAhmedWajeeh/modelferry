@@ -35,9 +35,12 @@ modelferry pack REPO_ID [--revision REV] --dest DIR
 modelferry verify BUNDLE_DIR [--quiet]
 modelferry unpack BUNDLE_DIR DEST_DIR [--no-verify] [--force]
 modelferry inspect BUNDLE_DIR
+modelferry verify-signature BUNDLE_DIR --public-key PATH
 ```
 
 `verify`, `unpack`, and `inspect` in the installed CLI are thin wrappers around the same code that ships inside every bundle (§7).
+
+`verify-signature` is different: it checks **authenticity**, not integrity, and is connected-side / appliance-side only. It confirms `manifest.json` was signed by a trusted key (the detached signature sidecar named by the manifest's `signing` block, §5), using a crypto library. It is deliberately NOT part of offline.py and is never copied into a bundle: the bare air-gap host checks integrity, the signature is checked upstream where the trusted key lives (§9). The trusted public key comes from `--public-key` or the `MODELFERRY_PUBLIC_KEY` env var, never embedded. Outcomes map onto §10 exit codes: a valid signature is 0; unsigned (no `signing` block, so no authenticity claim), a bad signature, a key-id mismatch, or a missing signature sidecar are all 1; a malformed signing block, unsupported algorithm, or unreadable key file is 2. Unsigned is deliberately not 0: absence of a signature must never read as "verified".
 
 Notes:
 
@@ -74,9 +77,11 @@ Files larger than chunk size exist in `payload/` only as `.mfpartNNNN` parts (4-
 
 Serialized with `json.dumps(..., indent=2, sort_keys=True)` and a trailing newline, so output is deterministic and diffs cleanly.
 
+As of 0.2.0 the schema is version 2. Version 2 is a strict superset of version 1: it adds one optional top-level `signing` block (below) and changes nothing else. A version-2 manifest with no signing block is byte-for-byte what a version-1 manifest was plus the bumped version number. The example below is an unsigned v2 manifest.
+
 ```json
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "bundle_name": "qwen2.5-7b-instruct__1a2b3c4",
   "created_at": "2026-07-15T09:30:00Z",
   "tool": {
@@ -131,7 +136,30 @@ Rules:
 - `parts[].name` is the part's own filename: a single path segment (no `/`) equal to `basename(files[].path)` + `.mfpart` + exactly four decimal digits (e.g. `model-00001-of-00004.safetensors.mfpart0000`). The reader enforces this and rejects any other name.
 - Whole-file `sha256` is always present, including for chunked files, so unpacked output can be re-verified against the manifest forever.
 - `license` comes from repo metadata. If it cannot be determined, the literal string `"UNKNOWN"` (and MANIFEST.md flags it prominently).
-- `manifest_version` is an integer. After Phase 2 the format is frozen: any change to structure or semantics bumps the version, and offline.py must reject versions it does not know with exit code 2 and a clear message.
+- `manifest_version` is an integer, currently `2` (raised from 1 in 0.2.0 to add the optional signing block). The format is frozen per version: any change to structure or semantics bumps the version. offline.py must reject a `manifest_version` it does not recognize with exit code 2 and a clear message. Which versions offline.py accepts for integrity is stated in §7 (it accepts 1 and 2 as of the 0.2.0 signing work; the offline.py edit that adds 2 is a separate, deliberately isolated change from the manifest bump that produces it).
+
+### Signing block (schema 2, optional)
+
+A signed bundle carries one extra top-level key, `signing`:
+
+```json
+{
+  "signing": {
+    "algorithm": "ed25519",
+    "key_id": "5f3c1a9b0d7e2f84",
+    "signature_file": "manifest.json.sig"
+  }
+}
+```
+
+Rules:
+
+- The block is **omitted entirely** when a bundle is unsigned. An unsigned manifest has no `signing` key at all; it is never `"signing": null`. "Is this bundle signed" is therefore a plain key-presence check.
+- `algorithm` names the signature format actually produced. modelferry 0.2.0 produces a native ed25519 signature, so the value is `"ed25519"`. The value `"minisign-ed25519"` is reserved for a future signer that emits real minisign-format signatures (see the native-key-format decision recorded in BUILD_PLAN.md task 0.2); it is not used while the signature is a raw ed25519 signature.
+- `key_id` is a stable fingerprint derived from the public key (the pack-side `Signer.key_id()`), so a receiving site can tell which key signed the bundle and match it against a published fingerprint. It is derived only from the public key, never from the secret key or the signature.
+- `signature_file` is the payload-relative name of the detached signature sidecar, `"manifest.json.sig"`. It is `.sig`, not `.minisig`, because the signature is a native ed25519 signature and not minisign's format; naming it `.minisig` would imply an interop it does not have. A future MinisignSigner would emit its own `.minisig` sidecar and set `algorithm` accordingly.
+- **The manifest never contains its own signature.** The signing block names the algorithm, the key, and the external sidecar filename, and nothing derived from the signature. The signature is computed over the final serialized `manifest.json` bytes and written to the separate sidecar (at pack time, wired in 0.6). Embedding the signature in the manifest would be circular: the bytes being signed would depend on the signature. The sidecar is verified out-of-band by the connected-side signature verifier (§9, and the 0.2.0 `verify_signature` tool), not by offline.py, which stays crypto-free and checks integrity only (§7).
+- Adding the signing block does not change serialization: `sort_keys=True` places `signing` deterministically among the top-level keys, so the same inputs still produce byte-identical `manifest.json`.
 
 ## 6. MANIFEST.md (officer-facing)
 
@@ -161,6 +189,7 @@ Prose style: plain sentences, contractions fine, no marketing language, no em da
 - One self-contained file. Pack copies this exact file into every bundle at `tools/modelferry_offline.py`.
 - Has its own `argparse`-based `__main__` with subcommands `verify`, `unpack`, `inspect` mirroring §3 semantics.
 - Contains its own manifest reader. Do not share a parsing module with the pack side; the round-trip test in §11 keeps writer and reader honest.
+- Accepts manifest schema versions 1 and 2 for integrity verification, and rejects any other version with exit code 2 (§10). Adding version 2 (0.2.0) is the only functional change from the 0.1.0 verifier: offline.py verifies integrity for both schemas and stays entirely unaware of signing. It imports no crypto and never verifies a signature. The optional `signing` block a v2 manifest may carry (§5) is simply ignored: it is not under `payload.files`, so the object hashing never touches it, and no signature sidecar is read or required. Authenticity is a separate concern, verified by a separate connected-side tool that holds the trusted public key (§9), never by this file. This split is deliberate: the bare air-gap host checks integrity against a manifest whose hash was approved out-of-band, and the signature protects that approval chain upstream, where a key and a crypto library live.
 - Soft cap 550 lines including docstrings, so a human can review the whole file in one sitting (raised from 500 in phase 2.2 to fit the symlink, atomic-join, and part-name hardening). If it grows past that, simplify rather than split.
 - Progress output: plain prints (files done / total, current file). No dependencies means no fancy bars, and that is fine.
 
@@ -180,12 +209,14 @@ Behavior:
 
 ## 9. Security requirements and trust model
 
-- No secrets in bundles or logs. `HF_TOKEN` is read from the environment, used for hub calls, and never written anywhere. A test packs with a fake token in the env and asserts the token bytes appear nowhere in the bundle (§11).
+- No secrets in bundles or logs. `HF_TOKEN` is read from the environment, used for hub calls, and never written anywhere. A test packs with a fake token in the env and asserts the token bytes appear nowhere in the bundle (§11). The signing key is read from `MODELFERRY_SIGNING_KEY` (a path) and is likewise never written into a bundle, manifest, sidecar, or log; only the public-key fingerprint (`key_id`) appears in the manifest.
 - Unpack is zip-slip safe per §7.
-- Trust model, stated honestly (this section is reproduced in the README):
-  - v1 protects against accidental corruption, incomplete transfers, media errors, and casual tampering with payload files.
-  - v1 does not protect against an adversary who can modify the payload, the manifest, and the bundled verifier together. That requires signature verification with an out-of-band key, which is v1.1 (minisign, §14).
-  - Mitigation available today: `manifest.json` records the sha256 of the bundled offline.py, and each release publishes the canonical offline.py hash in the release notes, so a receiving site can check the verifier out-of-band or bring their own copy.
+- Trust model, stated honestly (this section is reproduced in the README). Integrity and authenticity are separate concerns, checked by separate tools with different trust models and environments (§7):
+  - Integrity (the arrived bytes match the manifest) is checked by the bundled `offline.py` on the bare disconnected host, standard-library only, no network, no key. It protects against accidental corruption, incomplete transfers, media errors, and casual tampering with payload files: each shows up as a hash mismatch, a missing part, or an extra file.
+  - Authenticity (the manifest was signed by a trusted key) is checked by `verify-signature` (§3), a connected-side / appliance tool that holds the trusted public key and is never copied into the bundle. A signed bundle carries a detached signature over the exact `manifest.json` bytes in `manifest.json.sig` (§5). A bundle an adversary rebuilds from scratch, with its own internally consistent payload and hashes, passes its own integrity check but fails signature verification against the real key.
+  - The boundary, stated so it is not oversold: the bare-host integrity verifier does not verify the signature. On a truly bare air-gap host with only system Python and no trusted key, you get integrity; authenticity is established upstream at the approval or admission step where the key lives. Signing protects that approval chain. The trusted public key must reach verifiers out-of-band, and it is the approval authority for the receiving environment that distributes it (the same people who already approve the manifest checksum), not modelferry. modelferry has no signing key of its own: `pack --sign` signs a user's bundles with the user's key. The `key_id` in the manifest lets a verifier confirm which key a bundle claims to be signed by, but trust in that key comes from the operator's out-of-band distribution. This is key-based signing verified against a known key, not end-to-end authenticity on a bare host with no key.
+  - Signing is additive: an unsigned bundle still packs and verifies for integrity and carries no authenticity claim (`verify-signature` reports UNSIGNED, not valid).
+  - Out-of-band verification of the verifier remains available: `manifest.json` records the sha256 of the bundled offline.py, and each release publishes the canonical offline.py hash in the release notes, so a receiving site can check the verifier out-of-band or bring their own copy.
 
 ## 10. Errors and exit codes
 
@@ -245,7 +276,7 @@ modelferry/
 
 - Package requires Python >= 3.10. offline.py alone holds the 3.9 floor.
 - uv for dev environment, ruff for lint and format, pytest for tests.
-- Runtime dependencies are exactly three: typer, rich, huggingface_hub. Adding a fourth requires a spec change.
+- Runtime dependencies are typer, rich, huggingface_hub, and (as of 0.2.0 signing) pynacl. pynacl is connected-side only: it backs manifest signing in `signing.py` and must never enter `offline.py`, which stays standard-library only forever (§7). Adding any further dependency requires a spec change.
 
 ## 13. Build phases
 

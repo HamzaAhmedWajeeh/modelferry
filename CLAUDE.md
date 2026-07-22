@@ -18,7 +18,7 @@ CLI that packs Hugging Face models into chunked, sha256-manifested bundles for t
 - All payload IO is streamed with a fixed 8 MiB buffer. Never read a payload file fully into memory.
 - Unpack rejects absolute paths, `..` segments, and anything resolving outside the destination. Never create symlinks.
 - Exit codes exactly per SPEC.md §10. Do not invent new ones.
-- Runtime dependencies are typer, rich, huggingface_hub. Do not add a fourth without asking.
+- Runtime dependencies are typer, rich, huggingface_hub, and pynacl (added in 0.2.0 for connected-side signing in signing.py; it must never enter offline.py). Do not add another without asking.
 - Never weaken a corruption, path-safety, or token-leak test to make it pass. Fix the code instead.
 - Every bugfix ships with a regression test.
 
