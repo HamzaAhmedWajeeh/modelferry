@@ -119,3 +119,33 @@ jobs:
           "$mf" unpack "$bundle" ./out
           test -f ./out/model.safetensors
           echo "wheel-install round trip OK"
+      - name: Signed pack + verify-signature round trip through the installed wheel (network)
+        env:
+          HF_HUB_DISABLE_PROGRESS_BARS: "1"
+        run: |
+          mf=/tmp/wenv/bin/modelferry
+          py=/tmp/wenv/bin/python
+          work="$(mktemp -d)"
+          cd "$work"
+          # Ephemeral keypair, job-only: never committed, never a repo secret. Uses
+          # the installed modelferry's own generate_keypair so producer and verifier
+          # agree on the key format.
+          "$py" -c "from modelferry.signing import Ed25519Signer; Ed25519Signer.generate_keypair('key.sec','key.pub')"
+          MODELFERRY_SIGNING_KEY="$PWD/key.sec" "$mf" pack hf-internal-testing/tiny-random-gpt2 --dest ./bs --chunk-size 200K --exclude "*.bin" --exclude "*.h5" --sign
+          bundle="$(echo ./bs/tiny-random-gpt2__*)"
+          echo "signed bundle: $bundle"
+          # The signed bundle carries a signing block and the detached signature.
+          test -f "$bundle/manifest.json.sig"
+          "$py" -c "import json,sys; s=json.loads(open(sys.argv[1]).read())['signing']; assert s['algorithm']=='ed25519' and s['signature_file']=='manifest.json.sig', s; print('signing block:', s)" "$bundle/manifest.json"
+          # Positive: the installed verifier reports VALID / exit 0.
+          out="$("$mf" verify-signature "$bundle" --public-key key.pub)"
+          echo "$out"
+          echo "$out" | grep -q '^VALID:'
+          # Negative: tamper a manifest value (still valid JSON) so the signature no
+          # longer covers these bytes; verify-signature must now exit non-zero. Proves
+          # the installed verifier actually verifies, not just prints VALID.
+          "$py" -c "import json,sys; from modelferry import manifest; p=sys.argv[1]; m=json.loads(open(p,'rb').read()); m['created_at']='1999-01-01T00:00:00Z'; open(p,'wb').write(manifest.serialize(m))" "$bundle/manifest.json"
+          if "$mf" verify-signature "$bundle" --public-key key.pub; then
+            echo "ERROR: verify-signature passed on a tampered manifest"; exit 1
+          fi
+          echo "signed wheel-install round trip OK (VALID, then tamper rejected)"
