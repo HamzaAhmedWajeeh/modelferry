@@ -6,6 +6,26 @@ All notable changes to modelferry are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-22
+
+Documentation and packaging. No code changes: `offline.py` and all functionality
+are unchanged from 0.2.0, so a 0.2.1 bundle verifies identically and the bundled
+verifier's canonical sha256 is the same.
+
+### Changed
+
+- The README documents `pack --sign` and `verify-signature` in the usage and
+  quickstart sections, with a runnable "Signing a bundle" example, instead of only
+  in the trust-model discussion. `--sign` is listed among the pack flags, and the
+  manifest section notes the optional `signing` block and the `manifest.json.sig`
+  sidecar.
+
+### Fixed
+
+- The demo GIF in the README uses an absolute raw URL, so it renders on the PyPI
+  project page (relative paths do not resolve there).
+- The package author metadata is set instead of the placeholder.
+
 ## [0.2.0] - 2026-07-22
 
 Signing. A bundle's manifest can now be signed, and its authenticity checked
@@ -104,6 +124,7 @@ First release.
   publishes the canonical `offline.py` sha256 so a receiving site can check the
   bundled verifier out-of-band.
 
-[Unreleased]: https://github.com/HamzaAhmedWajeeh/modelferry/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/HamzaAhmedWajeeh/modelferry/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/HamzaAhmedWajeeh/modelferry/releases/tag/v0.2.1
 [0.2.0]: https://github.com/HamzaAhmedWajeeh/modelferry/releases/tag/v0.2.0
 [0.1.0]: https://github.com/HamzaAhmedWajeeh/modelferry/releases/tag/v0.1.0
