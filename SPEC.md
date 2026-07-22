@@ -35,9 +35,12 @@ modelferry pack REPO_ID [--revision REV] --dest DIR
 modelferry verify BUNDLE_DIR [--quiet]
 modelferry unpack BUNDLE_DIR DEST_DIR [--no-verify] [--force]
 modelferry inspect BUNDLE_DIR
+modelferry verify-signature BUNDLE_DIR --public-key PATH
 ```
 
 `verify`, `unpack`, and `inspect` in the installed CLI are thin wrappers around the same code that ships inside every bundle (§7).
+
+`verify-signature` is different: it checks **authenticity**, not integrity, and is connected-side / appliance-side only. It confirms `manifest.json` was signed by a trusted key (the detached signature sidecar named by the manifest's `signing` block, §5), using a crypto library. It is deliberately NOT part of offline.py and is never copied into a bundle: the bare air-gap host checks integrity, the signature is checked upstream where the trusted key lives (§9). The trusted public key comes from `--public-key` or the `MODELFERRY_PUBLIC_KEY` env var, never embedded. Outcomes map onto §10 exit codes: a valid signature is 0; unsigned (no `signing` block, so no authenticity claim), a bad signature, a key-id mismatch, or a missing signature sidecar are all 1; a malformed signing block, unsupported algorithm, or unreadable key file is 2. Unsigned is deliberately not 0: absence of a signature must never read as "verified".
 
 Notes:
 

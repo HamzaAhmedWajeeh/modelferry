@@ -33,6 +33,16 @@ SIGNING_KEY_ENV = "MODELFERRY_SIGNING_KEY"
 _KEY_ID_LEN = 16
 
 
+def public_key_id(public_key_bytes):
+    """Return the stable modelferry key id (fingerprint) for an ed25519 public key.
+
+    Single source of truth for how a key is named: Ed25519Signer.key_id() and the
+    verify_signature tool both derive the id from the public key this way, so a
+    signer and a verifier always agree. Derived only from the public key.
+    """
+    return hashlib.sha256(bytes(public_key_bytes)).hexdigest()[:_KEY_ID_LEN]
+
+
 class SigningError(Exception):
     """Raised when a signer cannot be constructed or used.
 
@@ -118,7 +128,7 @@ class Ed25519Signer:
 
     def key_id(self) -> str:
         """Return a stable fingerprint of the public key (never the secret)."""
-        return hashlib.sha256(self._public_key_bytes).hexdigest()[:_KEY_ID_LEN]
+        return public_key_id(self._public_key_bytes)
 
     @property
     def public_key_bytes(self) -> bytes:

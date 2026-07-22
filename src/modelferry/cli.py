@@ -113,6 +113,36 @@ def inspect(
     raise typer.Exit(offline.main(["inspect", bundle_dir]))
 
 
+@app.command(name="verify-signature")
+def verify_signature_cmd(
+    bundle_dir: Annotated[str, typer.Argument(help="Bundle directory to check.")],
+    public_key: Annotated[
+        str,
+        typer.Option(
+            "--public-key",
+            envvar="MODELFERRY_PUBLIC_KEY",
+            help="Path to the trusted ed25519 public key (hex). Or set MODELFERRY_PUBLIC_KEY.",
+        ),
+    ],
+) -> None:
+    """Verify a bundle's manifest signature against a trusted public key (connected side).
+
+    Authenticity, not integrity: this checks the manifest was signed by the trusted
+    key. It is separate from `verify`, which checks integrity on the bare host. The
+    key comes from --public-key or MODELFERRY_PUBLIC_KEY, never embedded.
+    """
+    from . import verify_signature as vs
+
+    try:
+        key = vs.load_public_key(public_key)
+    except vs.PublicKeyError as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(2) from None
+    result = vs.verify_bundle_signature(bundle_dir, key)
+    typer.echo(f"{result.outcome}: {result.message}", err=result.exit_code != 0)
+    raise typer.Exit(result.exit_code)
+
+
 def version_callback(value: bool) -> None:
     if value:
         typer.echo(__version__)
