@@ -46,6 +46,14 @@ def pack(
             "--staging", help="Local download directory. Defaults to ~/.cache/modelferry/."
         ),
     ] = None,
+    sign: Annotated[
+        bool,
+        typer.Option(
+            "--sign",
+            help="Sign the manifest. Requires MODELFERRY_SIGNING_KEY (a key path). "
+            "Without --sign the bundle is unsigned.",
+        ),
+    ] = False,
 ) -> None:
     """Pack a Hugging Face model repo into a bundle (connected side)."""
     try:
@@ -57,6 +65,7 @@ def pack(
             include=include,
             exclude=exclude,
             staging=staging,
+            sign=sign,
         )
     except PackError as e:
         typer.echo(f"error: {e}", err=True)
